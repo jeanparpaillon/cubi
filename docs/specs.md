@@ -587,7 +587,7 @@ needs a key at import. Where that key comes from is open (§4).
 
 ## 3. Phases
 
-One file per phase. Phases run in order; each ends with its acceptance.
+One file per phase. Phases run in order; each ends with its acceptance, automated as described in [testing.md](testing.md).
 
 | Phase | Scope |
 | --- | --- |

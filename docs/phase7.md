@@ -1,6 +1,6 @@
 # Phase 7 — plug into kubex
 
-Part of the kubex node boot plan: design in [specs.md](specs.md), open questions in [questions.md](questions.md).
+Part of the kubex node boot plan: design in [specs.md](specs.md), open questions in [questions.md](questions.md), tests in [testing.md](testing.md).
 
 - [ ] `cluster_boot` picks rejoin / join / bootstrap / restricted from the pool identity, the token file and the cmdline, refusing `join` + `bootstrap` together ([§2.8](specs.md)).
 - [ ] Stage-1 moves `/kubex/token` to `/root/.kubex/token` (0400); `cluster_boot` deletes it after the attempt. `kubex.token=` accepted with a warning, for QEMU only ([§2.8.2](specs.md)).
@@ -13,6 +13,7 @@ Part of the kubex node boot plan: design in [specs.md](specs.md), open questions
 - [ ] Boot server ([§2.7](specs.md)): inventory, per-node derivation of `kbxn_` tokens, token file served only to diskless nodes and not-yet-provisioned storage nodes, inventory synced to `allowed_ids`, `kubex.bootstrap=` rendered once.
 - [ ] Storage-role joins become Khepri voters (`khepri_cluster:join/2`) only after `Cluster.promote/1`; diskless nodes use the kubex API ([§2.8.1](specs.md), [§2.10.2](specs.md)).
 - [ ] Stale diskless members left behind by a reboot are expired.
+- [ ] Harness: `Cluster` fixture, fault injection and the `Leak` scanner ([testing.md](testing.md) §2, §6).
 
 **Acceptance:**
 

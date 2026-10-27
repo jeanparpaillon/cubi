@@ -1,6 +1,6 @@
 # Phase 2 — the system fork
 
-Part of the kubex node boot plan: design in [specs.md](specs.md), open questions in [questions.md](questions.md).
+Part of the kubex node boot plan: design in [specs.md](specs.md), open questions in [questions.md](questions.md), tests in [testing.md](testing.md).
 
 - [ ] Fork as `kubex_system_x86_64` and apply the [§2.5](specs.md) kernel delta, OpenZFS included ([§2.10.5](specs.md)).
 - [ ] Build stage-1 in Buildroot (a `post-image.sh` producing `images/stage1.cpio.zst`).

@@ -1,7 +1,8 @@
 # Phase 1 — boot by hand, no iPXE
 
-Part of the kubex node boot plan: design in [specs.md](specs.md), open questions in [questions.md](questions.md).
+Part of the kubex node boot plan: design in [specs.md](specs.md), open questions in [questions.md](questions.md), tests in [testing.md](testing.md).
 
+- [ ] `kubex_e2e` harness, tier 1: `VM`, `Console`, `Node`, and the `MIX_ENV=e2e` firmware ([testing.md](testing.md) §2–§3).
 - [ ] Write stage-1 (busybox script) and build its cpio by hand.
 - [ ] Extract `vmlinuz` and `rootfs.squashfs` from a stock `.fw`.
 - [ ] `qemu-system-x86_64 -kernel vmlinuz -initrd stage1.cpio.zst,rootfs.cpio -append console=ttyS0 -nographic`

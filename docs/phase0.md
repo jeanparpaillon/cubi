@@ -77,7 +77,10 @@ erlinit has no `/dev/null` or console. erlinit warns about the two
 | smallest `-m` that reaches IEx | 192 MB (17 MB left); 160 MB stalls; 128 MB OOM-panics |
 
 Those numbers come from Ubuntu's generic kernel, which reserves far more than the
-Nerves one will. Even so, **512 MB is the minimum spec** for a diskless node,
+Nerves one will. It also enables kexec handover by default, and the KHO scratch
+reservation sometimes takes ~400 MB before init; that was found in phase 1, and
+those runs were made without `kho=off`, so the floor rows are pessimistic and
+should be measured again on the forked kernel. Still, **512 MB is the minimum spec** for a diskless node,
 and storage nodes need more for the ZFS module (11 MB) and ARC
 ([questions.md](questions.md)).
 

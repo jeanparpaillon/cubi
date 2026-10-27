@@ -29,7 +29,7 @@ defmodule Kubex.E2E.VM do
             rtc: :host,
             boot: nil
 
-  @type boot :: {:direct, Path.t(), [Path.t()], String.t()} | :pxe
+  @type boot :: {:direct, Path.t(), [Kubex.E2E.Initrd.part()], String.t()} | :pxe
   @type disk :: {:virtio | :nvme, serial :: String.t(), file :: Path.t()}
   @type t :: %__MODULE__{
           name: String.t(),
@@ -75,7 +75,7 @@ defmodule Kubex.E2E.VM do
       rtc_args(spec.rtc),
       disk_args(spec.disks),
       net_args(spec, paths),
-      boot_args(spec.boot),
+      boot_args(spec.boot, paths),
       ["-chardev", "socket,id=con,path=#{socket(paths, :console)},server=on,wait=off"],
       ["-serial", "chardev:con"],
       ["-qmp", "unix:#{socket(paths, :qmp)},server=on,wait=off"]
@@ -128,17 +128,15 @@ defmodule Kubex.E2E.VM do
     ]
   end
 
-  defp boot_args({:direct, kernel, [initrd], cmdline}),
-    do: ["-kernel", kernel, "-initrd", initrd, "-append", cmdline]
+  defp boot_args({:direct, kernel, initrds, cmdline}, paths),
+    do: ["-kernel", kernel, "-initrd", initrd_path(initrds, paths), "-append", cmdline]
 
-  defp boot_args({:direct, _kernel, initrds, _cmdline}) do
-    # QEMU's -initrd takes one file for a Linux kernel (docs/phase0.md).
-    raise ArgumentError,
-          "boot: {:direct, …} takes exactly one initrd, got #{length(initrds)}: " <>
-            "concatenate them first, each padded to 4 bytes"
-  end
+  defp boot_args(:pxe, _paths), do: raise(ArgumentError, "boot: :pxe arrives with phase 4")
 
-  defp boot_args(:pxe), do: raise(ArgumentError, "boot: :pxe arrives with phase 4")
+  # QEMU's -initrd takes one file for a Linux kernel (docs/phase0.md), so
+  # anything but a single plain file is assembled into the test directory.
+  defp initrd_path([path], _paths) when is_binary(path), do: path
+  defp initrd_path(_initrds, paths), do: Path.join(paths.dir, "initrd.img")
 
   defp uuid_from(<<a::32, b::16, _::4, c::12, _::2, d::14, e::48, _::binary>>) do
     # RFC 9562 version 8 (custom), so it never collides with a real v4 UUID.
@@ -186,6 +184,7 @@ defmodule Kubex.E2E.VM do
 
     paths = %{dir: dir, run_dir: make_run_dir(), ssh_port: free_port()}
     prepare_firmware(spec.firmware, paths)
+    prepare_initrd(spec.boot, paths)
 
     args = argv(spec, paths)
     File.write!(Path.join(dir, "qemu.argv"), Enum.join(args, "\n") <> "\n")
@@ -252,6 +251,13 @@ defmodule Kubex.E2E.VM do
     :gen_tcp.close(socket)
     port
   end
+
+  defp prepare_initrd({:direct, _kernel, [path], _cmdline}, _paths) when is_binary(path), do: :ok
+
+  defp prepare_initrd({:direct, _kernel, initrds, _cmdline}, paths),
+    do: Kubex.E2E.Initrd.assemble!(initrds, initrd_path(initrds, paths))
+
+  defp prepare_initrd(:pxe, _paths), do: :ok
 
   defp prepare_firmware(:bios, _paths), do: :ok
 

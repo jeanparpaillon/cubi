@@ -3,23 +3,15 @@ defmodule Kubex.E2E.Phase1DirectBootTest do
   docs/phase1.md, acceptance: `Nerves.Runtime.firmware_valid?/0` is true, and
   `/` is read-only.
 
-  Boots `KUBEX_E2E_KERNEL` with `KUBEX_E2E_INITRD` (stage-1 and the e2e
-  rootfs, concatenated) directly, without iPXE.
+  Boots the kernel directly, without iPXE: stage-1 from `stage1/`, then the
+  e2e rootfs as a named initrd, as iPXE would hand it over (`Kubex.E2E.Artifacts`).
   """
   use Kubex.E2E.Case
 
+  alias Kubex.E2E.Artifacts
+
   @moduletag e2e: :tier1
   @moduletag timeout: 300_000
-
-  setup do
-    kernel = System.get_env("KUBEX_E2E_KERNEL")
-    initrd = System.get_env("KUBEX_E2E_INITRD")
-
-    if is_nil(kernel) or is_nil(initrd),
-      do: flunk("set KUBEX_E2E_KERNEL and KUBEX_E2E_INITRD to the phase 1 artifacts")
-
-    {:ok, kernel: Path.expand(kernel), initrd: Path.expand(initrd)}
-  end
 
   for firmware <- [:bios, :uefi] do
     test "#{firmware}: boots to IEx, firmware is valid, / is read-only", context do
@@ -28,7 +20,10 @@ defmodule Kubex.E2E.Phase1DirectBootTest do
           name: "p1-#{unquote(firmware)}",
           firmware: unquote(firmware),
           memory: 512,
-          boot: {:direct, context.kernel, [context.initrd], "console=ttyS0"}
+          boot:
+            {:direct, Artifacts.kernel!(),
+             [Artifacts.stage1!(), {"/rootfs.squashfs", {:file, Artifacts.rootfs!()}, 0o644}],
+             Artifacts.cmdline("console=ttyS0")}
         })
 
       Console.await(vm, ~r/Run \/init as init process/, 60_000)

@@ -242,8 +242,18 @@ so nothing in the image may hand an attacker a shell:
   production image it prints the error and reboots after a delay.
 - **No console IEx on production images.** erlinit's console runs a read-only
   status screen. Remote IEx goes over distribution, which needs an identity.
-- **The kernel and stage-1 ignore `init=` and `rdinit=`.** `/init` is fixed,
-  and stage-1 always `switch_root`s to erlinit.
+- **Stage-1 always `switch_root`s to erlinit**, ignoring `init=`, with no
+  arguments and a clean environment. The kernel hands unknown `key=value`
+  cmdline arguments to init as environment variables. Without `env -i`, a
+  cmdline `ERL_AFLAGS=…` reaches the BEAM as VM arguments (checked in
+  `apps/kubex_e2e/test/stage1_test.exs`).
+- **`rdinit=` is chosen by the kernel, before stage-1 runs**, and the kernel
+  passes leftover cmdline words to it as `argv`. With busybox in the
+  initramfs, `rdinit=/bin/busybox sh` is a root shell with the token still in
+  `/kubex/token` (checked in QEMU). Stage-1 cannot prevent that. A production
+  initramfs therefore holds no busybox: stage-1 becomes the small static C
+  program §2.4 anticipates ([phase 5](phase5.md)), so that `rdinit=` can only
+  name `/init` or a non-executable file.
 - **Only `kubex.*` arguments, `console=` and a short allowlist are read**,
   and none of them can grant a shell or disable a check.
   `kubex.token=` and `kubex.zfs.testkey=` are compiled out of production

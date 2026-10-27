@@ -1,0 +1,59 @@
+#!/bin/busybox sh
+# kubex stage-1 init (docs/specs.md §2.4).
+#
+# Loop-mounts /rootfs.squashfs read-only, puts a tmpfs on /root, carries the
+# join token across, and switch_roots to erlinit. build.exs replaces the
+# @…@ placeholders.
+#
+# A failure prints a message and reboots after a delay, so iPXE retries. Only
+# a dev build drops to a shell instead: a production image must never hand out
+# a shell (docs/security.md §5).
+
+MODE=@MODE@
+FAIL_DELAY=@FAIL_DELAY@
+
+export PATH=/bin
+umask 077
+
+fail() {
+    echo "kubex stage-1: $*"
+    if [ "$MODE" = dev ]; then
+        echo "kubex stage-1: dev build, dropping to a shell"
+        exec /bin/busybox sh
+    fi
+    echo "kubex stage-1: rebooting in $FAIL_DELAY s"
+    sleep "$FAIL_DELAY"
+    reboot -f
+}
+
+/bin/busybox --install -s /bin || fail "busybox --install failed"
+
+mount -t proc proc /proc || fail "cannot mount /proc"
+mount -t sysfs sysfs /sys || fail "cannot mount /sys"
+mount -t devtmpfs devtmpfs /dev || fail "cannot mount /dev"
+
+[ -f /rootfs.squashfs ] || fail "no /rootfs.squashfs in the initramfs"
+mount -t squashfs -o ro,loop /rootfs.squashfs /newroot ||
+    fail "cannot loop-mount /rootfs.squashfs"
+[ -x /newroot/sbin/init ] || fail "no /sbin/init in the rootfs"
+
+mount -t tmpfs -o mode=0700,nodev,nosuid tmpfs /newroot/root ||
+    fail "cannot mount a tmpfs on /root"
+
+# The join token arrives as an initrd file and dies with the initramfs:
+# move it to the tmpfs, readable by root only (§2.8.2). Never print it.
+if [ -e /kubex/token ]; then
+    mkdir -m 0700 /newroot/root/.kubex &&
+        cp /kubex/token /newroot/root/.kubex/token &&
+        chmod 0400 /newroot/root/.kubex/token ||
+        fail "cannot move the join token to /root/.kubex"
+    rm -f /kubex/token
+fi
+
+mount --move /dev /newroot/dev || fail "cannot move /dev into the rootfs"
+umount /proc /sys
+
+# Always erlinit, whatever init= says, with no arguments and a clean
+# environment: the kernel passes unknown key=value cmdline arguments to init
+# as environment variables, and they must not reach erlinit or the BEAM.
+exec env -i TERM=linux HOME=/ switch_root /newroot /sbin/init

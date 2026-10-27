@@ -96,21 +96,34 @@ the squashfs, until the system fork drops `/boot` from the rootfs.
 
 ### 2.4 Stage-1 init
 
-This is a static binary at `/init` in a tiny cpio. Busybox `sh` plus a ~30-line
-script is enough to start with, and a small static C program can replace it
-later if size or attack surface matters. Its whole job:
+This is `/init` in a tiny cpio. For now it is a busybox `sh` script,
+[`stage1/init`](../stage1/init), built by `elixir stage1/build.exs`. Production
+needs a small static C program instead, because busybox in the initramfs is a
+shell that `rdinit=` can reach ([security.md](security.md) §5). Its whole job:
 
 1. Mount `proc`, `sys`, `devtmpfs`.
 2. `losetup` + mount `/rootfs.squashfs` read-only on `/newroot`.
-3. Mount a tmpfs on `/newroot/root`. Persistence is not stage-1's concern:
-   kubex imports its ZFS pool from BEAM (§2.10.3).
-4. `mount --move /dev /newroot/dev`. erlinit expects a populated `/dev` and
+3. Mount a tmpfs on `/newroot/root` (`mode=0700,nodev,nosuid`). Persistence is
+   not stage-1's concern: kubex imports its ZFS pool from BEAM (§2.10.3).
+4. Move `/kubex/token`, if present, to `/newroot/root/.kubex/token`, mode
+   `0400` (§2.8.2).
+5. `mount --move /dev /newroot/dev`. erlinit expects a populated `/dev` and
    only remounts it; without the move it has no console and no `/dev/null`.
-5. `exec switch_root /newroot /sbin/init` (which is `erlinit`).
+6. `exec env -i TERM=linux HOME=/ switch_root /newroot /sbin/init`: always
+   erlinit, with no arguments and a clean environment. The kernel turns
+   unknown `key=value` cmdline arguments into init's environment, and
+   `ERL_AFLAGS=…` would otherwise reach the BEAM.
+
+The archive also ships `/dev/console` and an empty `/kubex` directory. The
+kernel does not create parent directories when it unpacks an initrd, so
+iPXE's `initrd … /kubex/token` needs `/kubex` to exist in an earlier archive.
+The build writes the archive itself, with owner 0 and mtime 0, so it needs no
+root and is reproducible.
 
 `switch_root` empties the old rootfs, but the loop device keeps the squashfs
-file alive. Failure at any step: print to console and drop to a shell in
-`dev` builds; reboot after a delay in `prod` builds, so iPXE retries.
+file alive. A failure at any step prints `kubex stage-1: …` on the console.
+`prod` builds then reboot after a delay, so iPXE retries; only `dev` builds
+drop to a shell. e2e images use `prod`.
 
 ### 2.5 Kernel configuration (system fork)
 

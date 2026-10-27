@@ -78,9 +78,10 @@ defmodule Kubex.E2E.VMTest do
     assert {"-device", "nvme,drive=d1,serial=KBXN0"} in p
   end
 
-  test "several initrds are refused: QEMU takes one for a Linux kernel" do
-    assert_raise ArgumentError, ~r/exactly one initrd/, fn ->
-      VM.argv(VM.normalize(spec(boot: {:direct, "/k", ["a", "b"], ""})), @paths)
+  test "several initrds, or a named one, become one assembled file in the test dir" do
+    for initrds <- [["a", "b"], [{"/kubex/token", "t", 0o400}]] do
+      argv = VM.argv(VM.normalize(spec(boot: {:direct, "/k", initrds, ""})), @paths)
+      assert {"-initrd", "/t/dir/initrd.img"} in pairs(argv)
     end
   end
 end

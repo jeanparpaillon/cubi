@@ -11,7 +11,8 @@ the root, and the apps live in `apps/`.
 | App | What |
 | --- | --- |
 | `apps/kubex_fw` | The Nerves firmware app (`nerves_system_x86_64` 1.34.0 for now). Run `MIX_TARGET=x86_64 mix firmware` from this directory. `MIX_ENV=e2e` trusts only the harness key |
-| `apps/kubex_e2e` | The host-only QEMU harness ([docs/testing.md](docs/testing.md) §2). Never a firmware dependency, and it has no `:nerves` dependency, so the shared config skips `nerves_bootstrap` for it. `mix test` runs unit tests; `mix test --only e2e:tier1` boots VMs |
+| `apps/kubex_e2e` | The host-only QEMU harness ([docs/testing.md](docs/testing.md) §2). Never a firmware dependency, and it has no `:nerves` dependency, so the shared config skips `nerves_bootstrap` for it. `mix test` runs unit tests; `mix test --only e2e:tier1` boots VMs (set `KUBEX_E2E_KERNEL`, and build the e2e firmware first) |
+| `stage1/` | The stage-1 initramfs ([docs/specs.md](docs/specs.md) §2.4): the busybox `init` script and `build.exs`, run with `elixir stage1/build.exs`. Not an app: phase 2 moves it into the system fork |
 
 Run `mix kubex.e2e.key` in `apps/kubex_e2e` before building e2e firmware. The
 key is gitignored. Building the firmware needs the `nerves_bootstrap` archive,

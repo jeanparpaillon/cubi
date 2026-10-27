@@ -9,6 +9,8 @@ nothing to flash, and "updating a node" means serving new files and rebooting it
 Nothing here is built yet. Points marked **(verify)** are assumptions to confirm
 in [phase 0](phase0.md) before anything depends on them. The work is split into phases
 (§3, one file each), and open questions are in [questions.md](questions.md).
+The threat model, and the recommended setup with a TPM on every machine, are
+in [security.md](security.md).
 
 ---
 
@@ -63,8 +65,12 @@ exact file `mix firmware` already produces.
 iPXE can hand the squashfs to the kernel as a named file inside the initramfs
 without us building a cpio for it: `initrd <url> /rootfs.squashfs` makes iPXE
 wrap it in a cpio header on the fly, and the kernel concatenates multiple
-initrds. **(verify** on both the BIOS and the EFI iPXE builds.**)** The fallback
-is to wrap it ourselves with `cpio -o -H newc`, which costs nothing.
+initrds. This works in both QEMU's BIOS ROM and `ipxe.efi` under OVMF, and
+`mode=400` on the token's `initrd` line is honoured ([phase 0](phase0.md)). The
+fallback is to wrap it ourselves with `cpio -o -H newc`, which costs nothing,
+but every piece must then be padded to a 4-byte boundary before concatenation.
+The kernel silently ignores a cpio that follows a compressed one unaligned;
+iPXE pads by itself.
 
 ### 2.3 Build: post-process the `.fw`, don't fight `mix firmware`
 
@@ -74,16 +80,19 @@ zip. So the iPXE artifacts are derived from the `.fw`:
 
 ```
 mix firmware  →  kubex.fw (zip)
-                   ├── data/rootfs.img      → rootfs.squashfs
-                   └── data/…/bzImage       → vmlinuz
+                   └── data/rootfs.img      → rootfs.squashfs
+                         └── /boot/bzImage  → vmlinuz
 stage1.cpio.zst  (built once, by the system)
 ```
 
-A `mix firmware.ipxe` task (in a small `kubex_ipxe` Mix dep, or in the fw app
-first) unzips those two resources, copies `stage1.cpio.zst` out of the system
+The `.fw` has no kernel resource: GRUB loads `/boot/bzImage` from the rootfs
+partition, so the kernel is only inside the squashfs ([phase 0](phase0.md)). A
+`mix firmware.ipxe` task (in a small `kubex_ipxe` Mix dep, or in the fw app
+first) unzips `data/rootfs.img`, takes the kernel out of it with `unsquashfs
+-cat rootfs.img boot/bzImage`, copies `stage1.cpio.zst` out of the system
 artifact directory, writes a `boot.ipxe`, and puts everything in
-`_build/<target>_<env>/ipxe/`. The exact resource paths inside the `.fw` depend
-on the system's `fwup.conf` **(verify:** `unzip -l` on an x86_64 `.fw`**)**.
+`_build/<target>_<env>/ipxe/`. The kernel then ships twice, 5.3 MB of it inside
+the squashfs, until the system fork drops `/boot` from the rootfs.
 
 ### 2.4 Stage-1 init
 
@@ -95,7 +104,9 @@ later if size or attack surface matters. Its whole job:
 2. `losetup` + mount `/rootfs.squashfs` read-only on `/newroot`.
 3. Mount a tmpfs on `/newroot/root`. Persistence is not stage-1's concern:
    kubex imports its ZFS pool from BEAM (§2.10.3).
-4. `exec switch_root /newroot /sbin/init` (which is `erlinit`).
+4. `mount --move /dev /newroot/dev`. erlinit expects a populated `/dev` and
+   only remounts it; without the move it has no console and no `/dev/null`.
+5. `exec switch_root /newroot /sbin/init` (which is `erlinit`).
 
 `switch_root` empties the old rootfs, but the loop device keeps the squashfs
 file alive. Failure at any step: print to console and drop to a shell in
@@ -103,16 +114,20 @@ file alive. Failure at any step: print to console and drop to a shell in
 
 ### 2.5 Kernel configuration (system fork)
 
-On top of the x86_64 defconfig, check or add:
+The stock x86_64 defconfig is a virtio-only QEMU target. It has no initramfs
+support, no loop device, no EFI stub, and no driver for physical NICs or disks;
+its only module is `efivarfs` ([phase 0](phase0.md) has the table). On top of it, add:
 
-- `BLK_DEV_INITRD`, `RD_ZSTD` (and/or `RD_XZ`), `SQUASHFS` + its compressor,
-  `BLK_DEV_LOOP`, `DEVTMPFS` — **built-in**, not modules: stage-1 runs before
-  any module can be loaded.
-- `EFI_STUB` and `EFI`: iPXE on UEFI boots `bzImage` as an EFI image and passes
-  the initrd through the EFI initrd protocol (needs a recent kernel; 6.x is fine).
-- NIC drivers (`e1000e`, `igb`, `r8169`, `virtio_net`, …) can stay modules: the
-  network is brought up by `vintage_net` after BEAM starts, and the kernel does
-  not need the network to boot because iPXE already fetched everything.
+- `BLK_DEV_INITRD`, `RD_ZSTD` (and/or `RD_XZ`), `BLK_DEV_LOOP` — **built-in**,
+  not modules: stage-1 runs before any module can be loaded. `SQUASHFS`,
+  `DEVTMPFS` and `TMPFS` are already built in, but squashfs with zlib only: add
+  `SQUASHFS_XZ` or `SQUASHFS_ZSTD` if the compressor changes ([questions.md](questions.md)).
+- `EFI_STUB` (`EFI` is already on): iPXE on UEFI boots `bzImage` as an EFI image
+  and passes the initrd through the EFI initrd protocol.
+- NIC drivers (`e1000e`, `igb`, `r8169`, …) as modules. `virtio_net` is already
+  built in. The network is brought up by `vintage_net` after BEAM starts, and
+  the kernel does not need the network to boot because iPXE already fetched
+  everything.
 - OpenZFS and storage drivers, as modules (§2.10.5).
 
 ### 2.6 `erlinit.config` and runtime configuration
@@ -270,10 +285,14 @@ master's scope, and then issues a certificate whose CN is the node's UUID.
   member's certificate and revokes the old one, so no stale member is left
   behind.
 - **Storage node:** the key and certificate are written to `/kubex/identity`.
-  After the first join, the boot server stops serving it a token (§2.7).
+  With that certificate it fetches the cluster's ZFS key and creates its
+  encrypted datasets (§2.10.4). After the first join, the boot server stops
+  serving it a token (§2.7).
 
 **Rejoin (storage node, identity on its pool).** No token is needed. The node
-goes straight to the handshake half of §2.9.4, and Ra catches up from its log. A
+fetches the ZFS key with its stored certificate and unlocks its pool
+(§2.10.4), then goes straight to the handshake half of §2.9.4, and Ra catches
+up from its log. A
 storage node that has lost its pool is a forced removal of the old voter
 ([architecture.md](architecture.md) §3). The boot server serves it a token again, and it joins as new.
 
@@ -295,8 +314,12 @@ must be a storage node with an empty pool (§2.10.2).
 4. On a match the node bootstraps:
    - It generates the cluster CA and its own node certificate, written to
      `/kubex/identity`.
-   - It creates its pool, starts Khepri on `/kubex/khepri` with itself as the
-     only member and voter (§2.10), and writes the CA there.
+   - It creates its pool, generates the cluster's ZFS key and creates
+     `<pool>/kubex/crypt` with it (§2.10.4). The page does not show the key: it
+     is exported separately, so that it never lands in the boot server's config
+     with the masters.
+   - It starts Khepri on `/kubex/khepri` with itself as the only member and
+     voter (§2.10), and writes the CA there.
    - It starts TLS distribution.
    - It mints two masters, one per role, each with an expiry, and its own UUID
      on their allowlists.
@@ -333,6 +356,8 @@ Rules for the bootstrap web server:
   | **masters** | the boot server and Khepri on every voter | at rest on voters: §2.10.4 |
   | **a node token** | one node's tmpfs, between stage-1 and the end of its join | one UUID, one role, until its master expires |
   | **the OTP** | one node's cmdline | spent minutes after boot |
+  | **the ZFS key** | RAM of unlocked storage nodes, the operator's export | served only to the certificate pinned for a storage member: §2.10.4 |
+  | **a storage node's identity key** | in clear on its pool | fetches the ZFS key until that member is removed: §2.10.4 |
 
 ### 2.9 What to reuse from NervesHub: client and server
 
@@ -414,6 +439,11 @@ sequenceDiagram
     K-->>B: Committed (status: registered)
     B-->>N: Certificate signed by cluster CA, CA chain, cluster config
     N->>N: KV.put cert/key (+ /kubex/identity on storage), build :ssl opts
+    opt storage node
+        N->>B: GET /zfs-key over mTLS with the new certificate (§2.10.4)
+        B-->>N: ZFS key, if the cert is the one pinned for a storage member
+        N->>N: create <pool>/kubex/crypt with it, mount khepri and log
+    end
     N->>K: TLS distribution handshake
     K->>K: verify_fun = SSL.decide/2: path-valid, CN known, pin cert
     K-->>N: Connected (status: provisioned)
@@ -429,10 +459,15 @@ A few points:
   scopes carry an expiry. Stage-1 doesn't set the time, so the join waits for
   `nerves_time` to sync, or trusts the RTC if the boot script says so. A wrong
   clock fails with a console message, not a silent retry loop.
-- **`verify_fun` in TLS distribution** must be given in the dist options file as
-  `{Module, Function, State}`, not as a fun **(verify** against `inet_tls_dist`
-  for the OTP version in the system**)**. `decide/2` already has the
-  stateless shape that needs.
+- **`verify_fun` in TLS distribution** goes in the `-ssl_dist_optfile` as a
+  fun, `{verify_fun, {fun 'Elixir.Kubex.SSL':verify/3, State}}`. OTP 29
+  evaluates that file with `erl_eval` and hands it to `ssl` unchanged, so the
+  `{Module, Function, State}` form is rejected there, and distribution then
+  just fails to connect (`pang`) with nothing logged. That form is only parsed
+  for `-ssl_dist_opt server_verify_fun` on the command line, which accepts a
+  fixed whitelist of options and is not used ([phase 0](phase0.md)). The
+  callback is arity 3, so `verify/3` is a thin wrapper over the stateless
+  `decide/2`. The CN arrives as a UTF-8 binary.
 
 ### 2.10 Cluster state in Khepri, persisted on ZFS
 
@@ -462,6 +497,8 @@ Everything §2.9 called "membership" is a path in one store:
 [kubex, pki, crl]
 [kubex, tokens, MasterId]                    master secret, scope (role, expires_at, max_joins, allowed_ids), join count, deactivated_at
 [kubex, joins, Seq]                          audit: node key, uuid, source address, result   (§2.8.5)
+[kubex, zfs_key]                             SHA-256 of the ZFS key, created_at, exported_at; never the key   (§2.10.4)
+[kubex, key_fetches, Seq]                    audit: uuid, cert fingerprint, source address, result   (§2.10.4)
 [kubex, config]                              cluster config returned by a join
 ```
 
@@ -473,9 +510,13 @@ How the copied NervesHub code (§2.9.2) maps onto it:
   *before* the transaction, which only records the result.
 - **`decide/2` lookups and the revocation ordering** use projections: ETS tables
   that Khepri keeps in sync on every member. That way the TLS handshake never
-  waits on a Raft round-trip, and a revocation reaches every member's table
-  **(verify** the projection API in 0.19**)**. Triggers don't fit here: they run
-  only on the leader, at least once.
+  waits on a Raft round-trip, and a revocation reaches every member's table.
+  Checked on 0.19.3 ([phase 0](phase0.md)): a projection registered once exists
+  on every member, a rejoining or restarted member rebuilds it, and a delete
+  clears the row everywhere. The table does not exist while the local store is
+  stopped, so `decide/2` fails closed when `ets:whereis/1` returns `undefined`.
+  Path patterns use `?KHEPRI_WILDCARD_STAR`. `'_'` registers fine and matches
+  nothing. Triggers don't fit here: they run only on the leader, at least once.
 - **Projections are slightly stale.** A certificate revoked a few milliseconds
   ago can still pass one handshake. Registration stays exact, because it is a
   transaction.
@@ -517,10 +558,12 @@ Consequences:
 rather than in stage-1 keeps the ZFS modules and tools in the squashfs. The
 steps:
 
-1. **Load ZFS.** `modprobe zfs` with `spl_hostid` derived from the SMBIOS UUID.
-   That is stable per machine, so the pool imports without `-f` across reboots,
-   while a pool moved to other hardware still needs a deliberate `-f`
-   **(verify)**.
+1. **Load ZFS.** `modprobe spl spl_hostid=<H>`, then `modprobe zfs`, with `H`
+   derived from the SMBIOS UUID: 32 bits, never 0. That is stable per machine,
+   so the pool imports without `-f` across reboots, even after a power loss,
+   while a pool moved to other hardware still needs a deliberate `-f`. A pool
+   that was cleanly exported imports anywhere. A hostid of 0 is refused like
+   any foreign one. All of this was checked on OpenZFS 2.3.9 ([phase 0](phase0.md)).
 2. **Import.** `zpool import -N -o cachefile=none -d /dev <name>`:
    - `-N` because the rootfs is read-only, so nothing may automount;
    - `cachefile=none` because there is nowhere to keep one;
@@ -542,20 +585,32 @@ steps:
      so `sync=disabled` is never allowed.
    - Its children:
 
-     | Dataset | Holds |
-     | --- | --- |
-     | `<pool>/kubex/khepri` | Ra's data directory: `khepri:start("/kubex/khepri")` |
-     | `<pool>/kubex/identity` | node key and certificate |
-     | `<pool>/kubex/log` | logs and crash dumps |
+     | Dataset | Mounted on | Holds |
+     | --- | --- | --- |
+     | `<pool>/kubex/identity` | `/kubex/identity` | node key and certificate, CA chain, peer addresses. **In clear**: it is what fetches the key |
+     | `<pool>/kubex/crypt` | — | encryption root, no data (§2.10.4) |
+     | `<pool>/kubex/crypt/khepri` | `/kubex/khepri` | Ra's data directory: `khepri:start("/kubex/khepri")` |
+     | `<pool>/kubex/crypt/log` | `/kubex/log` | logs and crash dumps, which can hold the key |
+
+     `crypt` and its children exist only once there is a key: they are created
+     at bootstrap or at a storage node's first join (§2.10.4). Before that, and
+     in restricted mode, logs stay in RAM. For hand-booted QEMU with no cluster
+     ([phase 6](phase6.md)), `kubex.zfs.testkey=<hex>` on the cmdline keys
+     `crypt`, with a warning, like `kubex.token=` (§2.8.2). Bootstrap and join
+     refuse a pool that was keyed this way.
 6. **The rest of the pool** is left to workloads, later.
 
 On a graceful leave or shutdown ([architecture.md](architecture.md) §3), kubex stops Khepri, then runs
 `zpool export`.
 
 **Device names.** Nerves runs no udev, so `/dev/disk/by-id/` does not exist
-**(verify)**. `kubex.vdevs=` therefore takes by-id-*style* names, and kubex
-resolves them itself from sysfs (model + serial, or WWN) to `/dev/nvme0n1` and
-the like. The alternative, adding eudev to the system, is heavier for one lookup.
+(checked in [phase 0](phase0.md)). `kubex.vdevs=` therefore takes by-id-*style*
+names, and kubex resolves them itself from sysfs to `/dev/nvme0n1` and the like.
+The sysfs sources:
+`/sys/block/nvme*/device/{model,serial}` and `wwid` for NVMe,
+`/sys/block/vd*/serial` for virtio-blk, and `/sys/block/sd*/device/{model,wwid}`
+for SCSI and SATA. The values are space-padded. The alternative, adding eudev
+to the system, is heavier for one lookup.
 
 What the pool gives the boot flow:
 
@@ -565,20 +620,119 @@ What the pool gives the boot flow:
   `kubex.bootstrap=` is refused and the node restarts its member instead. A
   rebooted bootstrap node therefore can't create a second cluster.
 - **A whole-cluster restart is recovery, not re-bootstrap.** Storage nodes
-  import their pools, and Ra elects a leader once a majority is back.
+  import their pools, and Ra elects a leader once a majority is back. If every
+  storage node went down, the first one back needs the exported ZFS key typed
+  in (§2.10.4); partial restarts need nobody.
 
 #### 2.10.4 Secrets at rest
 
-The CA key and the token secrets now sit on disk, on every voter. ZFS native
-encryption on `<pool>/kubex` (`encryption=aes-256-gcm`) closes that, but it
-needs a key at import. Where that key comes from is open (§4).
+The CA key and the token secrets sit on disk, on every voter. ZFS native
+encryption closes that: `<pool>/kubex/crypt` is an encryption root
+(`encryption=aes-256-gcm`, `keyformat=hex`, `keylocation=prompt`) holding
+`khepri` and `log` (§2.10.3). Its key is **one key for the whole cluster**,
+kept on no disk. A storage node fetches it over HTTPS from the first node,
+authenticated by its own client certificate, and the operator exports it for
+disaster recovery.
+
+**Where the key lives:**
+
+| Place | When |
+| --- | --- |
+| RAM of every unlocked storage node | from its `zfs load-key` until shutdown, held by one process (`Kubex.ZfsKey`), redacted in `format_status/1`, never logged |
+| the operator's offline copy | after `Cluster.export_zfs_key/0` |
+| nowhere else | not in Khepri, which it encrypts, nor the boot server, nor `/kubex/identity` |
+
+**Lifecycle:**
+
+1. **Created at bootstrap** (§2.8.4): `:crypto.strong_rand_bytes(32)`, then the
+   encryption root is created with it. Khepri records only
+   `[kubex, zfs_key]`: its SHA-256, `created_at`, `exported_at`.
+2. **Fetched at join** (§2.8.3): once issuance has returned a certificate, a
+   new storage node fetches the key and creates its encryption root with it.
+3. **Fetched at every boot** of a storage node: import, mount
+   `<pool>/kubex/identity`, fetch, `zfs load-key -L prompt`, mount the
+   children, start Khepri. The key reaches `zfs` on a stdin pipe and never
+   touches a file.
+4. **Exported** with `Cluster.export_zfs_key/0` while the cluster runs, from
+   any unlocked storage node: the 64 hex characters, plus an audit record
+   and a warning in the log (without the key). `Cluster.status/1` warns as long
+   as `exported_at` is unset. Do it right after bootstrap. Until then, a
+   power loss on every storage node at once loses the cluster.
+
+**The key endpoint.** `GET /zfs-key` on the join endpoint's HTTPS listener
+(§2.9.4). Every member serves it once its own pool is unlocked. The listener
+asks for a client certificate without requiring one (`verify: :verify_peer`,
+`fail_if_no_peer_cert: false`), because `/join` callers don't have one yet.
+`/zfs-key` serves the key only if all of these hold:
+
+- the certificate is path-valid against the cluster CA and not in the CRL;
+- its fingerprint is the one pinned for its CN in
+  `[kubex, members, Id, certs, …]`. Issuance pins one certificate per UUID and
+  revokes the previous one (§2.8.3), so each node has a unique client
+  certificate, and that certificate is the credential;
+- the member is a storage node, `registered` or `provisioned`, not `removed`.
+  Diskless nodes have no pool and are always refused.
+
+Every fetch is recorded like a join (§2.8.5), and attempts are rate-limited
+per source address. A fetch for a UUID whose node is already connected over
+distribution is the signal that a disk and its identity were copied.
+
+**The client side** runs in BEAM, over `:ssl` with the identity's key and
+certificate, and verifies the server against the cluster CA, never a system
+store. It tries the `kubex.join=` host, the first node, then the peer
+addresses that the cluster keeps in `/kubex/identity/peers`, in turn. This is
+what makes the first node's own reboot work: it has no `kubex.join=`, and gets
+the key from a peer. `keylocation=https://…` was the other option. It would fix
+one URL into a dataset property, configure client certificates through
+environment variables, and report failures as an exit code.
+
+**Cold start.** After a power loss of every storage node, no member holds the
+key, so nothing is unlocked and Khepri has no quorum. A storage node that gets
+no answer from any source starts an **unlock page**, with the bootstrap web
+server's rules (§2.8.4): HTTPS with a self-signed certificate whose fingerprint
+is on the console, rate-limited attempts. The operator pastes the exported key.
+The node checks it with `zfs load-key -n` and unlocks, and the others, which
+kept retrying in the background, fetch the key from it and unlock in turn. Ra
+elects a leader once a majority is back. The first node serves before any
+quorum exists, so `/zfs-key` decides from the local projections, rebuilt as the
+member replays its own log **(verify)**. If they only fill once a leader
+exists, the fallback is a CA-signed list of pinned fingerprints kept next to
+the identity.
+
+**What this protects, and what it doesn't:**
+
+- **A disk taken off the network** is unreadable: its identity alone yields
+  nothing without a member to answer.
+- **A disk plugged back in somewhere that reaches the cluster** gets the key
+  with the identity stored in clear on it, until that member is removed. The
+  forced removal (§2.8.3) revokes its certificate, and from then on its disks
+  are dead. Sealing the identity key in a TPM (the `Kubex.Credentials` slot of
+  §2.9.3) closes this.
+- **Rotation** is `Cluster.rotate_zfs_key/0`: a new key, `zfs change-key` on
+  every storage node (it rewraps the dataset keys, nothing is re-encrypted),
+  and a new export. Older exports stop working.
+
+**With the export, the pool opens without kubex.** On any Linux with OpenZFS:
+`zpool import -N <pool>`, then
+`zfs load-key -L prompt <pool>/kubex/crypt`. Raw sends (`zfs send -w`) of
+`<pool>/kubex/crypt/khepri` stay encrypted off-cluster, and the same export
+opens them.
 
 #### 2.10.5 System fork additions
 
-- **OpenZFS through Buildroot's `zfs` package.** It builds the modules against
-  the system kernel plus `zpool`/`zfs`, and pulls in `libtirpc`, util-linux
-  `libblkid`/`libuuid`, `zlib` and `openssl` **(verify** that the Buildroot in
-  `nerves_system_br` 1.34.0 carries it, and what it adds to the squashfs**)**.
+- **OpenZFS through Buildroot's `zfs` package**, OpenZFS 2.4.1 in the Buildroot
+  2026.05 of `nerves_system_br` 1.34.0. It builds the modules against the system
+  kernel plus `zpool`/`zfs`. It pulls in `libaio`, `libcurl`, and `libtirpc`
+  (musl has no native RPC). zlib, OpenSSL and util-linux `libblkid`/`libuuid`
+  are already in the rootfs. Two consequences:
+  - **The package `depends on BR2_PACKAGE_HAS_UDEV`**, which the stock
+    devtmpfs-only system does not have, so it cannot be selected as is. OpenZFS's
+    configure treats libudev as optional. The plan is a copy of the package in
+    the system's `BR2_EXTERNAL` with that dependency dropped, rather than
+    switching `/dev` management to eudev for a library nobody runs.
+  - **About +3.3 MB in the gzip squashfs** (≈ 15 MB unpacked, `zfs.ko` alone
+    11.4 MB once stripped), estimated from a musl build of 2.3.9. The exact
+    number comes from the phase 2 build ([phase 0](phase0.md)).
 - **Storage drivers** (`nvme`, `ahci`, `sd_mod`, `virtio_blk`, `virtio_scsi`)
   as modules, loaded before the import.
 - **Licensing.** Shipping the CDDL ZFS module next to a GPL kernel in one image

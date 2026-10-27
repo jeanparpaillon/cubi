@@ -32,10 +32,13 @@ from ExUnit. It is not part of any firmware.
 | `Kubex.E2E.Sandbox` | Tier 2's network namespace: bridge, taps, dnsmasq, boot server, NTP, packet capture (§4.2) |
 | `Kubex.E2E.Disk` | qcow2 fixtures: blank, pre-partitioned ("dirty"), and pools carried over between boots (§5) |
 | `Kubex.E2E.Cluster` | N-VM fixture with helpers: `bootstrap/2` (drives the OTP page), `boot_storage/2`, `boot_diskless/2`, `restart_all/1`, `voters/1` |
-| `Kubex.E2E.Leak` | Scans every serial log, the packet capture and each guest's `/root` for every secret the test minted: masters, node tokens and OTPs ([specs §2.8.5](specs.md)) |
+| `Kubex.E2E.Leak` | Scans every serial log, the packet capture and each guest's `/root` for every secret the test minted: masters, node tokens, OTPs and the ZFS key ([specs §2.8.5](specs.md), [§2.10.4](specs.md)). For the ZFS key it also scans the raw disk images |
 
 Each test gets its own directory under `_build/e2e/<test>/`, holding sockets,
-disks, logs and the capture. On failure the directory is kept. With
+disks, logs and the capture. Unix socket paths are limited to 108 bytes, and a
+checkout path plus a test name easily exceeds that. QEMU then exits at
+startup, so the harness starts QEMU with that directory as its working
+directory and passes the QMP and console sockets as relative paths. On failure the directory is kept. With
 `KUBEX_E2E_KEEP=1`, the VMs are left running too, and
 `mix kubex.e2e.console <test> <vm>` attaches to one.
 
@@ -118,7 +121,11 @@ hosts need handling:
   before the tests.
 
 KVM inside the user namespace is checked against the real user's credentials,
-and here `/dev/kvm` carries an ACL for the logged-in user **(verify)**.
+and here `/dev/kvm` carries an ACL for the logged-in user. QEMU with KVM boots
+fine inside a `bwrap` user namespace ([phase 0](phase0.md)). That same test shows
+why the harness needs its own profile: `bwrap`'s shipped AppArmor profile allows
+the namespace but drops `CAP_NET_ADMIN`, so creating the bridge and the taps
+fails with EPERM.
 
 If neither works, the fallback is a one-time `sudo ip netns add` per worker,
 then running the harness through `ip netns exec`.
@@ -168,7 +175,7 @@ qemu-system-x86_64 -machine q35,accel=kvm -cpu host -m 1024 -nographic \
 | --- | --- |
 | reboot | QMP `system_reset` |
 | crash | QMP `quit`, or `SIGKILL` to QEMU |
-| graceful shutdown | QMP `system_powerdown`. The guest must act on the ACPI power button **(verify** that erlinit/Nerves does; otherwise `Nerves.Runtime.poweroff/0` over `Kubex.E2E.Node`**)** |
+| graceful shutdown | `Nerves.Runtime.poweroff/0` over `Kubex.E2E.Node`. QMP `system_powerdown` does nothing: the kernel registers the ACPI power button, but nothing in erlinit or Nerves listens for it ([phase 0](phase0.md)). If kubex starts handling `KEY_POWER` itself, so that storage nodes export their pool when a hypervisor or a finger asks, this row switches to QMP |
 | network partition | QMP `set_link n0 off`; `tc netem` on the VM's tap for latency or loss |
 | freeze (GC pause, overloaded host) | QMP `stop`, then `cont` |
 | whole-cluster restart | `Kubex.E2E.Cluster.restart_all/1`: kill every VM, keep their disks |
@@ -186,7 +193,7 @@ qemu-system-x86_64 -machine q35,accel=kvm -cpu host -m 1024 -nographic \
 | [4](phase4.md) | `phase4_netboot_test.exs` | 1 | TFTP and HTTP × BIOS and UEFI, no disk |
 | [5](phase5.md) | `phase5_boot_chain_test.exs` | 2 | tampered squashfs refused; script per UUID; proxy-DHCP next to plain DHCP |
 | [6](phase6.md) | `phase6_storage_test.exs` | 1 | blank mirror created; reboot keeps Khepri data; dirty disk and missing `kubex.zfs.create=1` refused |
-| [7](phase7.md) | `phase7_cluster_test.exs` | 2 | bootstrap through the web page; 3 storage + 1 diskless; each refusal case; A's token presented as B; `Kubex.E2E.Leak` over everything; whole-cluster restart |
+| [7](phase7.md) | `phase7_cluster_test.exs` | 2 | bootstrap through the web page; 3 storage + 1 diskless; each refusal case; A's token presented as B; `/zfs-key` refusals; `Kubex.E2E.Leak` over everything; first node restarted alone; whole-cluster restart through the unlock page; exported key opens a disk image outside kubex |
 
 A failing acceptance bullet names its test, and the test names the bullet in
 its `@moduledoc`.
@@ -217,4 +224,4 @@ its `@moduledoc`.
 | OVMF | `OVMF_CODE_4M.fd` and `OVMF_VARS_4M.fd` in `/usr/share/OVMF/` |
 | `/dev/kvm` | `root:kvm` with an ACL |
 | unprivileged user namespaces | restricted (`apparmor_restrict_unprivileged_userns = 1`): tier 2 needs the AppArmor profile from §4.2 |
-| `chronyd`, `tcpdump` | not checked yet |
+| `chronyd`, `tcpdump` | installed |

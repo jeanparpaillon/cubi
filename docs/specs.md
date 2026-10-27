@@ -179,7 +179,7 @@ A node gets everything it needs to join or create a cluster from three places:
 
 | Source | Carries | Notes |
 | --- | --- | --- |
-| cmdline `kubex.join=<HOST>` | endpoint of an existing cluster: README §2's `bootstrap_endpoint` | not secret, fine to log |
+| cmdline `kubex.join=<HOST>` | endpoint of an existing cluster: [architecture.md](architecture.md) §2's `bootstrap_endpoint` | not secret, fine to log |
 | initrd file `/kubex/token` | this node's join token, `kbxn_<master id>.<uuid>:<secret>` (§2.8.1) | never on the cmdline (§2.8.2) |
 | cmdline `kubex.bootstrap=<OTP>` | no cluster yet: this node creates one | single-use, spent minutes after boot (§2.8.4) |
 
@@ -275,10 +275,10 @@ master's scope, and then issues a certificate whose CN is the node's UUID.
 **Rejoin (storage node, identity on its pool).** No token is needed. The node
 goes straight to the handshake half of §2.9.4, and Ra catches up from its log. A
 storage node that has lost its pool is a forced removal of the old voter
-(README §3). The boot server serves it a token again, and it joins as new.
+([architecture.md](architecture.md) §3). The boot server serves it a token again, and it joins as new.
 
 Either way, a node that never comes back is expired by failure detection
-(forced removal, README §3).
+(forced removal, [architecture.md](architecture.md) §3).
 
 #### 2.8.4 Bootstrap: the first node
 
@@ -371,7 +371,7 @@ other:
 | **Per-device vs per-product secrets** | `Devices.SharedSecretAuth` (stored per device) next to `Products.SharedSecretAuth` (`nhp_`) | **Same two levels**, with the device level derived from the product level (§2.8.1), so nothing per node is stored |
 | **Pre-registration** | `maybe_jitp_device/2` with `jitp: nil`: an identifier not created beforehand → `:device_not_registered` | **Copy** as the `allowed_ids` check (§2.8.1) |
 | **Revocation racing a connect** | `DeviceSocket` subscribes to the key's topic *before* the lookup, so a deactivation racing a connect is never missed | **Same ordering** in the join endpoint, on the master's deactivation event (Khepri projection, §2.10.1) |
-| **JITP at the TLS handshake** | `NervesHub.SSL.decide/2`, an `:ssl` `verify_fun`: find the signer by AKI → SKI, `:public_key.pkix_path_validation/3` against it, require a CN, look up the certificate by fingerprint, else the device by public-key fingerprint, else create the device from the CN; pin the certificate (fingerprint, serial, AKI/SKI, validity) | **Copy as the TLS distribution `verify_fun`** on every member. The CA lookup is the cluster CA, not a table, and "device" is the Khepri member record. A peer presenting a cluster-signed certificate becomes *provisioned* on its first distribution handshake: README's "Report ready → Active membership", done in the handshake |
+| **JITP at the TLS handshake** | `NervesHub.SSL.decide/2`, an `:ssl` `verify_fun`: find the signer by AKI → SKI, `:public_key.pkix_path_validation/3` against it, require a CN, look up the certificate by fingerprint, else the device by public-key fingerprint, else create the device from the CN; pin the certificate (fingerprint, serial, AKI/SKI, validity) | **Copy as the TLS distribution `verify_fun`** on every member. The CA lookup is the cluster CA, not a table, and "device" is the Khepri member record. A peer presenting a cluster-signed certificate becomes *provisioned* on its first distribution handshake: [architecture.md](architecture.md)'s "Report ready → Active membership", done in the handshake |
 | **Safety rules in `decide/2`** | self-signed peer accepted only if pinned (`register: false`); deleted device → refused; one public key per device (`:unexpected_pubkey`); CN must match the existing device (`:mismatched_cert`) | **Keep all except one.** A new public key for a known UUID is a diskless reboot (§2.8.3). It is allowed only through a fresh NH1-authenticated join, which revokes the old certificate. The same key change arriving *without* a join is still refused |
 | **`decide/2` needs no database** | split from `verify_fun/3` so that a TLS terminator with no database can ask over the cluster | **Fits as is.** On a storage node it reads Khepri projections locally (§2.10.1). A diskless node that accepts connections asks a storage node, the remote path NervesHub built it for |
 | **`NervesHub.Certificate`** (176 lines) | AKI/SKI/CN/serial/validity/fingerprint/public-key-fingerprint helpers over `X509` | **Copy verbatim** |
@@ -450,7 +450,7 @@ its own configuration there (`zones/usbkey`). In kubex:
 [Khepri](https://github.com/rabbitmq/khepri) is a tree-structured database
 replicated with Raft through Ra. It is licensed Apache-2.0 OR MPL-2.0. At
 0.19.x it is the default metadata store of RabbitMQ 4.2 and the only one from
-4.3, but its API is not frozen before 1.0. It *is* README §4's
+4.3, but its API is not frozen before 1.0. It *is* [architecture.md](architecture.md) §4's
 consensus-backed membership: there is no separate Raft to build.
 
 Everything §2.9 called "membership" is a path in one store:
@@ -499,10 +499,10 @@ kinds of node:
 Consequences:
 
 - **The bootstrap node must be a storage node.** Tolerating one failure needs
-  three storage nodes (README §4). A cluster of diskless nodes only is not
+  three storage nodes ([architecture.md](architecture.md) §4). A cluster of diskless nodes only is not
   supported.
 - **A storage node that loses its pool** (for example after a disk swap) is a
-  forced removal of the old voter (README §3), followed by a fresh token join.
+  forced removal of the old voter ([architecture.md](architecture.md) §3), followed by a fresh token join.
   Khepri resyncs its data from the cluster on that join.
 
 #### 2.10.3 ZFS: boot arguments, pool and reserved dataset
@@ -549,7 +549,7 @@ steps:
      | `<pool>/kubex/log` | logs and crash dumps |
 6. **The rest of the pool** is left to workloads, later.
 
-On a graceful leave or shutdown (README §3), kubex stops Khepri, then runs
+On a graceful leave or shutdown ([architecture.md](architecture.md) §3), kubex stops Khepri, then runs
 `zpool export`.
 
 **Device names.** Nerves runs no udev, so `/dev/disk/by-id/` does not exist

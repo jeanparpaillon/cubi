@@ -1,0 +1,2 @@
+# The harness key is generated locally (`mix kubex.e2e.key`), never committed.
+/priv/harness_key/

@@ -21,7 +21,7 @@ together, not that every branch is right.
 
 ## 2. The harness: `kubex_e2e`
 
-This is a host-only Mix project in the kubex repository (`e2e/`). It drives QEMU
+This is a host-only app in the kubex umbrella (`apps/kubex_e2e`), never a dependency of the firmware. It drives QEMU
 from ExUnit. It is not part of any firmware.
 
 | Module | Job |
@@ -34,11 +34,15 @@ from ExUnit. It is not part of any firmware.
 | `Kubex.E2E.Cluster` | N-VM fixture with helpers: `bootstrap/2` (drives the OTP page), `boot_storage/2`, `boot_diskless/2`, `restart_all/1`, `voters/1` |
 | `Kubex.E2E.Leak` | Scans every serial log, the packet capture and each guest's `/root` for every secret the test minted: masters, node tokens, OTPs and the ZFS key ([specs §2.8.5](specs.md), [§2.10.4](specs.md)). For the ZFS key it also scans the raw disk images |
 
-Each test gets its own directory under `_build/e2e/<test>/`, holding sockets,
-disks, logs and the capture. Unix socket paths are limited to 108 bytes, and a
-checkout path plus a test name easily exceeds that. QEMU then exits at
-startup, so the harness starts QEMU with that directory as its working
-directory and passes the QMP and console sockets as relative paths. On failure the directory is kept. With
+Each test gets its own directory under `_build/e2e/<module>/<test>/`, holding
+disks, logs (`console.log`, `qmp.log`), the QEMU argv and the capture. It is
+wiped when the test starts and kept afterwards. The QMP and console sockets
+are not in it. Unix socket paths are limited to 108 bytes, a checkout path plus
+a test name easily exceeds that, and the harness must connect to the sockets
+too, so they go in a short private directory, `$XDG_RUNTIME_DIR/kbx-<random>/`
+(mode 0700), removed when the VM stops. QEMU starts paused (`-S`) and is
+resumed over QMP once the console is attached, because a `wait=off` chardev
+drops whatever the guest prints before a client connects. With
 `KUBEX_E2E_KEEP=1`, the VMs are left running too, and
 `mix kubex.e2e.console <test> <vm>` attaches to one.
 
@@ -187,7 +191,7 @@ qemu-system-x86_64 -machine q35,accel=kvm -cpu host -m 1024 -nographic \
 
 | Phase | Test file | Tier | Main fixtures |
 | --- | --- | --- | --- |
-| [1](phase1.md) | `e2e/test/phase1_direct_boot_test.exs` | 1 | `boot: {:direct, …}`; asserts `firmware_valid?`, read-only `/` |
+| [1](phase1.md) | `apps/kubex_e2e/test/phase1_direct_boot_test.exs` | 1 | `boot: {:direct, …}`; asserts `firmware_valid?`, read-only `/` |
 | [2](phase2.md) | `phase2_system_fork_test.exs` | 1 | the same test, against artifacts from the fork |
 | [3](phase3.md) | `phase3_firmware_ipxe_test.exs` | unit + 1 | the output directory's contents, then a boot from it |
 | [4](phase4.md) | `phase4_netboot_test.exs` | 1 | TFTP and HTTP × BIOS and UEFI, no disk |

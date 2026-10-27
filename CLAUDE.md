@@ -3,7 +3,20 @@
 Runs BEAM releases on a cluster without Kubernetes: nodes network-boot into BEAM,
 join with a token, and keep membership in Khepri on ZFS.
 
-**Status: design stage.** There is no code yet. The repository is documentation only.
+**Status: phase 1.** Code so far: the test harness and a stock firmware app.
+
+An umbrella project: `config/`, `deps/`, `_build/` and `mix.lock` are shared at
+the root, and the apps live in `apps/`.
+
+| App | What |
+| --- | --- |
+| `apps/kubex_fw` | The Nerves firmware app (`nerves_system_x86_64` 1.34.0 for now). Run `MIX_TARGET=x86_64 mix firmware` from this directory. `MIX_ENV=e2e` trusts only the harness key |
+| `apps/kubex_e2e` | The host-only QEMU harness ([docs/testing.md](docs/testing.md) §2). Never a firmware dependency, and it has no `:nerves` dependency, so the shared config skips `nerves_bootstrap` for it. `mix test` runs unit tests; `mix test --only e2e:tier1` boots VMs |
+
+Run `mix kubex.e2e.key` in `apps/kubex_e2e` before building e2e firmware. The
+key is gitignored. Building the firmware needs the `nerves_bootstrap` archive,
+and host builds of `kubex_fw` (a root `mix test`, for example) need
+`libmnl-dev` for `nerves_uevent`.
 
 ## Entry points
 

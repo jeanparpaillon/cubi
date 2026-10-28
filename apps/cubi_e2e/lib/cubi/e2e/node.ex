@@ -19,13 +19,15 @@ defmodule Cubi.E2E.Node do
   end
 
   @doc """
-  Evaluates `code` on the guest and returns its value. Waits for ssh to come
+  Evaluates `code` on the guest and returns its value. The guest is a
+  `Cubi.E2E.VM`, or the host port forwarded to its ssh (a
+  `Cubi.Provider.Qemu` instance's `ssh_port`). Waits for ssh to come
   up for at most `timeout` ms, which covers the boot. Raises
   `Cubi.E2E.Node.EvalError` if the code raises on the guest.
   """
-  @spec eval(GenServer.server(), String.t(), timeout()) :: term()
+  @spec eval(GenServer.server() | :inet.port_number(), String.t(), timeout()) :: term()
   def eval(vm, code, timeout \\ 120_000) do
-    port = VM.info(vm).paths.ssh_port
+    port = ssh_port(vm)
     deadline = System.monotonic_time(:millisecond) + timeout
 
     conn = connect(port, deadline)
@@ -47,10 +49,10 @@ defmodule Cubi.E2E.Node do
   would: sends `data`, then EOF, and returns the lines it printed and its
   exit status. Waits for ssh like `eval/3`.
   """
-  @spec subsystem(GenServer.server(), String.t(), binary(), timeout()) ::
+  @spec subsystem(GenServer.server() | :inet.port_number(), String.t(), binary(), timeout()) ::
           {[String.t()], non_neg_integer() | nil}
   def subsystem(vm, name, data, timeout \\ 120_000) do
-    port = VM.info(vm).paths.ssh_port
+    port = ssh_port(vm)
     deadline = System.monotonic_time(:millisecond) + timeout
     conn = connect(port, deadline)
 
@@ -145,4 +147,7 @@ defmodule Cubi.E2E.Node do
   end
 
   defp remaining(deadline), do: max(deadline - System.monotonic_time(:millisecond), 0)
+
+  defp ssh_port(port) when is_integer(port), do: port
+  defp ssh_port(vm), do: VM.info(vm).paths.ssh_port
 end

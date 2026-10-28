@@ -1286,7 +1286,7 @@ Providers:
 
 | Module | What |
 | --- | --- |
-| `Cubi.Provider.Qemu` | local, for development and for the harness: background QEMU processes, BIOS or UEFI, state under `_build/cubi/qemu/<name>/`, booted from a local HTTP server serving a public directory and the per-instance script, as [phase 4](phase4.md)'s tests do |
+| `Cubi.Provider.Qemu` | local, for development and for the harness: background QEMU processes (`-daemonize`, so they outlive the Mix task), BIOS or UEFI, state under `_build/cubi/qemu/<name>/`. The script is the one thing it stores, and QEMU's user-mode TFTP delivers it, as [phase 4](phase4.md)'s `:tftp` boots do; the images come from whatever URL the script names, a local server being `http://10.0.2.2:<port>` to the guest. ssh is forwarded to a host port, and a reboot is a cold restart of QEMU |
 | `Cubi.Provider.Vultr` | its REST API (`Req`), which stores a `pxe` startup script and boots an instance from it **(verify)** |
 | AWS (not in milestone 2) | the ipxe.org EC2 image, which runs its user data as the script **(verify)**; needs the `ena` and `nvme` drivers in the kernel (§2.5) |
 

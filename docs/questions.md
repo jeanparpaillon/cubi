@@ -17,6 +17,25 @@ Decisions not yet taken. Section numbers refer to [specs.md](specs.md).
 - **Khepri before 1.0.** The API may change. Pin the version, and keep Khepri
   calls behind one kubex module so that an upgrade touches a single place.
 - **ZFS licensing** for distributed images ([§2.10.5](specs.md)).
+- **When is a deployed release good?** In milestone 1 any exit of a release's
+  application rolls back, even long after the settle period
+  ([§2.11.7](specs.md)). Nerves instead treats a firmware as good once
+  validated. Alternative: once settled (or after an explicit validate), a
+  later exit restarts the same version, and only repeated failures roll back.
+- **Several releases per node.** Milestone 1 allows one ([§2.11.6](specs.md)).
+  More needs per-name state and a conflict check between releases, not only
+  against the base image.
+- **Who may deploy.** Anyone with an authorized ssh key can *send* a release
+  ([§2.11.5](specs.md)); the signature decides what runs. With
+  [phase 7](phase7.md), the channel could require a cluster-CA client
+  certificate instead.
+- **`config/runtime.exs` in releases.** Not evaluated in milestone 1
+  ([§2.11.3](specs.md)). `Config.Reader` is on the node, but runtime config
+  read from the node's environment needs a decision on what that environment
+  is.
+- **Revocation of signers.** None in milestone 1 ([§2.11.1](specs.md)). A CRL in
+  the image, or a signed revocation list deployed like a release, would let a
+  leaked signer be cut off without a new root.
 - **`kubex.join=` names one host.** If that node is down, joins fail. A list of
   hosts, or a DNS name kept up to date by the cluster, would avoid that.
 - **Diskless nodes' logs and crash dumps** vanish with the RAM; storage nodes

@@ -10,6 +10,8 @@ Part of the kubex node boot plan: design in [specs.md](specs.md), open questions
 - [x] `/dev/disk/by-id` absent under Nerves; `spl_hostid` keeps imports `-f`-free across reboots ([§2.10.3](specs.md)).
 - [ ] Test infrastructure ([testing.md](testing.md) §4.2, §6, §8): AppArmor profile for unprivileged user namespaces, KVM inside the namespace, ACPI power button handling in Nerves, `/dev/kvm` on CI runners.
 - [x] Khepri 0.19 projections, and `verify_fun` as `{M, F, State}` in the `inet_tls_dist` options file ([§2.9.4](specs.md)).
+- [ ] iPXE `imgverify` with a `TRUST=` build accepts an RSA-3072 signer with `codeSigning`, and which key types it accepts besides RSA ([§2.11.1](specs.md)).
+- [ ] shoehorn 0.9 calls its handler's `application_exited/3` for an application started with `Application.ensure_all_started/2` after boot, not only for its `init`/`app` list ([§2.11.7](specs.md)).
 
 ## Results
 

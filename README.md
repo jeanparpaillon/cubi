@@ -99,6 +99,12 @@ chooses which version each node boots, so promoting a version, testing it on a
 few nodes first and rolling it back are all done on the boot server. Nodes have
 no A/B partitions and no package manager.
 
+Your application can also be deployed onto a running node, without a reboot.
+You sign the release with your own CA (`mix kubex.release`, `mix kubex.sign`) and
+send it over ssh (`mix kubex.deploy <node>`). The node checks the signature
+against the CA built into its image, starts the release, and goes back to the
+previous one if it crashes ([docs/specs.md](docs/specs.md) §2.11).
+
 ## Is it for you?
 
 kubex is a good fit when:

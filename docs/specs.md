@@ -5,6 +5,8 @@ an initramfs over HTTP(S), and the machine comes up straight into BEAM. The OS
 lives in RAM. Anything that must survive a reboot lives on a ZFS pool whose
 disks are named on the kernel cmdline, the way SmartOS does it (§2.10). There is
 nothing to flash, and "updating a node" means serving new files and rebooting it.
+Application releases are the exception: they are signed and deployed onto a
+running node (§2.11).
 
 Nothing here is built yet. Points marked **(verify)** are assumptions to confirm
 in [phase 0](phase0.md) before anything depends on them. The work is split into phases
@@ -25,8 +27,8 @@ A standard Nerves firmware is tied to a block device at every layer:
 | App data (`/root`) | ext4/f2fs partition | tmpfs |
 | Cluster state, PKI | — | Khepri, on a ZFS dataset reserved for kubex, on nodes given disks with `kubex.vdevs=` (§2.10) |
 | Firmware metadata | U-Boot env (`nerves_fw_*` KV) | `Nerves.Runtime.KVBackend.InMemory`, seeded at build time |
-| Update | `fwup` writes the inactive slot | the iPXE server serves a new pair of files; the node reboots |
-| Rollback / validate | `nerves_fw_validated` + slot switch | no-op locally: the boot server decides which version to serve |
+| Update | `fwup` writes the inactive slot | the iPXE server serves a new pair of files; the node reboots. Application releases are deployed on top without a reboot (§2.11) |
+| Rollback / validate | `nerves_fw_validated` + slot switch | no-op locally: the boot server decides which version to serve. A failing application release is rolled back on the node (§2.11.7) |
 | Node identity | serial number from `boardid` | a certificate issued on join: `kubex.join=` on the cmdline plus a per-node token delivered as an initrd file, or created by the first node from `kubex.bootstrap=<OTP>` (§2.8). Storage nodes keep it on their pool across reboots; diskless nodes rejoin on every boot (§2.8.3) |
 
 Erlang distribution, `vintage_net`, `shoehorn` and `nerves_runtime` are unchanged
@@ -637,6 +639,7 @@ steps:
      | `<pool>/kubex/crypt` | — | encryption root, no data (§2.10.4) |
      | `<pool>/kubex/crypt/khepri` | `/kubex/khepri` | Ra's data directory: `khepri:start("/kubex/khepri")` |
      | `<pool>/kubex/crypt/log` | `/kubex/log` | logs and crash dumps, which can hold the key |
+     | `<pool>/kubex/releases` | `/kubex/releases` | deployed application releases (§2.11.6). **In clear**: signed, and checked at every boot |
 
      `crypt` and its children exist only once there is a key: they are created
      at bootstrap or at a storage node's first join (§2.10.4). Before that, and
@@ -811,6 +814,238 @@ opens them.
   is the position Ubuntu takes, and it is still debated. Distributing kubex
   images needs that decision taken deliberately.
 
+### 2.11 Releases on a running node
+
+The image is still upgraded by rebooting (§2.7). On top of it, an operator can
+push an **application release** onto a running node, without a reboot, and the
+node rolls it back by itself when it fails. This is [milestone 1](milestone1.md):
+it needs no Erlang distribution, no join and no Khepri. Each node is handled on
+its own, over ssh, and trusts whatever is signed by the operator's CA.
+
+It mimics Nerves firmware signing and `mix upload`:
+
+| Nerves | kubex |
+| --- | --- |
+| `mix firmware.gen.key` → `fwup-key.{pub,priv}` (ed25519) | `mix kubex.gen_ca` → root CA and a signer certificate issued by it (§2.11.1) |
+| public keys passed to `fwup --public-key` on the device | the CA certificate in the rootfs, `/etc/kubex/ca.pem` (§2.11.2) |
+| `mix firmware.sign` → signature added inside the `.fw` | `mix kubex.sign` → signature added inside the release archive (§2.11.4) |
+| `mix upload <host>` → `ssh_subsystem_fwup` | `mix kubex.deploy <node>` → the `kubex_deploy` ssh subsystem (§2.11.5) |
+| `Nerves.Runtime.validate_firmware/0`, else revert to the other slot | a settle period, then a shoehorn handler that reverts to the previous release (§2.11.7) |
+
+#### 2.11.1 PKI: a root CA and a signer
+
+`mix kubex.gen_ca` writes four files into `~/.kubex/pki/` (`--dir` or
+`KUBEX_PKI_DIR` overrides it; the directory is created `0700`):
+
+| File | What |
+| --- | --- |
+| `ca.pem`, `ca.key` | self-signed root, `CA:TRUE`, `pathlen:0`, 20 years |
+| `signer.pem`, `signer.key` | issued by the root, `CA:FALSE`, `keyUsage=digitalSignature`, `extendedKeyUsage=codeSigning`, 10 years |
+
+- **RSA-3072**, not ECDSA: the boot images are checked by iPXE `imgverify`,
+  which must accept the key **(verify)**. One key type keeps one signer for
+  both uses.
+- **It refuses to overwrite.** A second run into a directory holding any of the
+  four files fails and changes nothing. A lost CA means new images for every
+  node, so replacing it is never a side effect.
+- **`--signer-only`** issues a new signer from an existing root, for when the
+  signer key is lost or rotated. Nodes need no change: they trust the root.
+- Keys are written unencrypted, mode `0600`. Both are **offline** keys, held by
+  the operator ([security.md](security.md) §2): they never reach the boot
+  server or a node. The root is only needed again to issue a signer.
+- Built with the `x509` package (§2.9.3), in `apps/kubex_pki`, which runs on the
+  host and on the node.
+
+There is no revocation in milestone 1. Rotating the signer does not invalidate
+what the old one signed; rotating the root does, at the cost of new images.
+
+#### 2.11.2 Signed boot images
+
+- **The CA is in the image.** The firmware build copies the root certificate
+  (configured as `config :kubex_fw, :ca_cert`) into the rootfs as
+  `/etc/kubex/ca.pem`. Never the signer, never a key. The rootfs signature
+  therefore covers the CA the node will trust for releases.
+- **`mix firmware.ipxe --signer <dir>`** writes a detached CMS signature next to
+  each image: `vmlinuz.sig`, `stage1.cpio.zst.sig`, `rootfs.squashfs.sig`, made
+  with `openssl cms -sign -binary -noattr -outform DER`, signer certificate
+  included. That is the format `imgverify` reads. They are listed in
+  `SHA256SUMS`. `:public_key` cannot write CMS, so this adds `openssl` to the
+  build host's prerequisites. Without `--signer`, `MIX_ENV=dev` builds an
+  unsigned directory with a warning and every other environment refuses.
+- **`boot.ipxe` gets the `imgverify` lines only with `--imgverify`.** A stock
+  iPXE (QEMU's ROM, distribution `ipxe.efi`) does not trust our CA and would
+  refuse every image. Only the custom iPXE built with `TRUST=` the root
+  certificate (§2.7) runs a script that has them:
+
+  ```ipxe
+  kernel vmlinuz console=ttyS0
+  imgverify vmlinuz vmlinuz.sig
+  initrd stage1.cpio.zst
+  imgverify stage1.cpio.zst stage1.cpio.zst.sig
+  initrd rootfs.squashfs /rootfs.squashfs
+  imgverify rootfs.squashfs rootfs.squashfs.sig
+  boot
+  ```
+
+  A failed `imgverify` stops the script before `boot`. A production boot
+  server renders its own per-node scripts (§2.7) with the same lines.
+- e2e images are signed with a test CA that `mix kubex.e2e.key` creates next to
+  the harness key ([testing.md](testing.md)).
+
+#### 2.11.3 What a release is
+
+A kubex release holds only what the base image lacks. Its applications are
+loaded into the node's own BEAM, next to the base image's (§2.11.6), not run as
+a second BEAM: that is what lets shoehorn watch them, and it saves a second
+ERTS in RAM.
+
+`mix kubex.release --base <ipxe dir>`, run in the user's Mix project, builds a
+`mix release` and packs `_build/<env>/kubex/<name>-<version>.tar.gz`:
+
+```
+manifest.json
+lib/<app>-<vsn>/ebin/…            one directory per application
+lib/<app>-<vsn>/priv/…
+releases/<version>/sys.config     build-time configuration
+```
+
+- **`--base`** names a served directory (§2.3), from which it reads
+  `base.json`: the OTP release, the ERTS version and every application with its
+  version in the image. `mix firmware.ipxe` writes that file. Applications in
+  `base.json` at the same version are left out of the archive; at another
+  version, the task refuses. This covers `elixir` and `logger` too, so the
+  release must be compiled with the image's Elixir.
+- **Same target as the image.** Pure Erlang and Elixir code builds anywhere;
+  NIFs need the project built with the image's `MIX_TARGET` and system, as
+  `kubex_fw` is.
+- **Configuration is build-time only.** `sys.config` is applied with
+  `Application.put_all_env/1` before the applications start. `config/runtime.exs`
+  is not evaluated in milestone 1, and its presence is a warning.
+- **`manifest.json`** (Elixir's `JSON`, so nothing extra on the node):
+
+  | Key | What |
+  | --- | --- |
+  | `format` | `1` |
+  | `name`, `version` | the release |
+  | `otp_release`, `erts_version` | what it was built for, copied from `base.json` |
+  | `applications` | `[{name, vsn}]`, every application in the archive |
+  | `start` | the applications to start, in order: the release's own, not their dependencies, which `ensure_all_started` reaches |
+  | `files` | `{path: sha256}` for every other file in the archive |
+
+#### 2.11.4 Signature
+
+`mix kubex.sign <archive> [--signer <dir>]` signs the exact bytes of
+`manifest.json` with `signer.key` (RSA, SHA-256, `:public_key.sign/3`) and adds
+two members to the archive in place, the way `mix firmware.sign` rewrites the
+`.fw`: `manifest.sig` (the raw signature) and `signer.pem`. Signing an archive
+that is already signed replaces both.
+
+The manifest hashes every file, so one signature covers the archive. The bytes
+are signed as they are: there is no canonical JSON to agree on.
+
+The node verifies with `:public_key` only, no OpenSSL, in this order:
+
+1. `signer.pem` is path-valid against `/etc/kubex/ca.pem`
+   (`:public_key.pkix_path_validation/3`), with `codeSigning` in its extended
+   key usage.
+2. `manifest.sig` verifies over `manifest.json` with the signer's key.
+3. The archive holds exactly the files in `files` plus the manifest, the
+   signature and `signer.pem`, and each matches its hash. Paths are relative,
+   with no `..` and no symlinks.
+4. `format` is known and `otp_release` is the node's.
+5. Every application in `applications` is either absent from the node's
+   `lib/` or present there at the same version (then skipped).
+
+At deploy (§2.11.5) the signer's validity dates are checked against the node's
+clock, which `nerves_time` keeps at least at the image's build time. At boot
+(§2.11.6) they are not: a release must not vanish from a node because its signer
+expired while it ran. Every other step is repeated.
+
+#### 2.11.5 Deploy over ssh
+
+Like `mix upload`, the transport is ssh, and the session's authorized keys are
+`nerves_ssh`'s. Erlang distribution stays off. The ssh session decides who may
+*send* a release; only the signature decides whether it is installed.
+
+- **On the node,** `kubex_deploy` is an ssh subsystem registered with
+  `nerves_ssh` (`subsystems:`), the way `ssh_subsystem_fwup` is. It reads the
+  archive from the channel up to EOF, at most 256 MB (it lands in RAM on a
+  diskless node), into `/kubex/releases/incoming/`, then verifies (§2.11.4),
+  unpacks to `/kubex/releases/<version>/` and installs (§2.11.6).
+- **It answers with lines,** `kubex_deploy: <step>` for progress and one final
+  `ok <name> <version>` or `error <reason>`, plus the channel's exit status, so
+  any ssh client can drive it.
+- **`mix kubex.deploy <node> [archive]`** streams the newest archive in
+  `_build/<env>/kubex/` with the system `ssh -s <node> kubex_deploy`, honouring
+  `--port`, `--user` and `--identity`, prints the node's lines and exits non-zero
+  unless the last one is `ok`. An unsigned archive is refused before it is
+  sent.
+- The answer comes **after the settle period** (§2.11.7), so a release that
+  crashes a few seconds after starting is reported as a failed deploy, not as
+  `ok`.
+
+#### 2.11.6 On the node: storage, load, start
+
+**One release per node** in milestone 1. A second release name is refused;
+deploying another version of the same name replaces it.
+
+- **Where.** `/kubex/releases/`. On a storage node that is the dataset
+  `<pool>/kubex/releases` (§2.10.3), in clear: integrity comes from the
+  signature, checked again at every boot. A release must therefore not carry
+  secrets in `sys.config`. On a diskless node it is a tmpfs mounted on
+  `/kubex`, so a reboot drops every deployed release and the node runs the base
+  image alone.
+- **State** is `/kubex/releases/state.json`: `current`, `previous` (versions or
+  `null`) and `bad` (a list of versions), written to a temporary file and
+  renamed. Only the directories of `current`, `previous` and an incoming
+  version are kept; older ones are deleted after a successful install.
+- **Load.** For each application dir: `:code.add_patha(ebin)`, then
+  `Application.load/1`; then `sys.config` through `Application.put_all_env/1`.
+- **Start.** `Application.ensure_all_started(app, :temporary)` for each entry of
+  `start`, in order. `:temporary` because a release must never take the base
+  image down with it: when one of its applications dies, the node keeps
+  running and shoehorn hears of it (§2.11.7). A start returning an error is a
+  failed start, handled as in §2.11.7 without waiting for shoehorn.
+- **Stop.** In reverse order: `Application.stop/1`, `Application.unload/1`,
+  `:code.purge/1` then `:code.delete/1` for every module in the application's
+  `modules`, `:code.del_path/1`. Purging kills any process still running the
+  old code, so nothing of a stopped release survives. Two versions of a
+  release are never loaded at once.
+- **Install** = verify, stop `current`, load and start the new version, wait the
+  settle period, then `previous` ← `current` ← new version.
+- **Boot.** `Kubex.Deploy` starts after shoehorn's `init` list
+  (`config :shoehorn, init: [:nerves_runtime, :nerves_pack, :kubex_fw]`),
+  verifies `current` again and starts it. A `current` that fails verification
+  or start at boot is rolled back like any other failure.
+
+#### 2.11.7 Rollback through shoehorn
+
+shoehorn installs a `logger` filter that turns every "application exited"
+report into a call to its handler, for applications started at any time, not
+only at boot **(verify)**. kubex sets `config :shoehorn, handler:
+Kubex.Deploy.ShoehornHandler`:
+
+- It returns `{:continue, state}` for every application. A dead base image
+  application is left to shoehorn's usual behaviour, never a halt from kubex.
+- For an application of `current` that exited with any reason other than
+  `:stopped`, it casts `{:failed, app, reason}` to `Kubex.Deploy` and returns
+  at once. It never stops or starts anything itself: it runs inside shoehorn's
+  report handler. Exits caused by `Kubex.Deploy`'s own stop are `:stopped` and
+  ignored.
+
+`Kubex.Deploy` then **rolls back**: it stops `current` (§2.11.6), adds its
+version to `bad`, and starts `previous`, which becomes `current`, with
+`previous` left `null`. With no `previous`, it only stops the release. A
+version in `bad` is never started again: not at boot, and not when the same
+archive is deployed again, which is refused. Deploying a new version is the
+only way forward.
+
+**The settle period** (`--settle`, default 10 s) is the window during an install
+in which a failure makes the deploy itself fail (§2.11.5). The rollback is the
+same during and after it: in milestone 1, *any* later exit of a `current`
+application rolls back too, even days later. Whether a release should instead
+be considered good once settled is open ([questions.md](questions.md)).
+
 ## 3. Phases
 
 One file per phase. Phases run in order; each ends with its acceptance, automated as described in [testing.md](testing.md).
@@ -824,5 +1059,6 @@ One file per phase. Phases run in order; each ends with its acceptance, automate
 | [4](phase4.md) | network boot in QEMU |
 | [5](phase5.md) | hardened boot chain |
 | [6](phase6.md) | storage |
+| [M1](milestone1.md) | signed releases on standalone nodes, no distribution (§2.11) |
 | [7](phase7.md) | plug into kubex |
 | [8](phase8.md) | real hardware |

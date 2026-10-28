@@ -32,116 +32,19 @@ https://…/cubi/<version>/                   rendered by mix cubi.provision,
 
 ## Design
 
-To fold into [specs.md](specs.md) as §2.12 (first checklist item). The points
-below are the decisions; the spec gives them their full form.
-
-**The public image is generic.** It carries no CA, no ssh key and no signer.
-`mix firmware.ipxe --public` builds it: no `/etc/cubi/ca.pem`, no
-`nerves_ssh` authorized keys compiled in, and the build fails if either is
-configured. The project publishes one directory per version (vmlinuz,
-stage1, rootfs, `base.json`, `SHA256SUMS`, and `.sig` files signed by the
-**cubi project's** CA, for operators who run a custom iPXE that trusts it).
-`base.json` is what `mix cubi.release --base` reads, so `--base` accepts that
-URL as well as a local directory.
-
-**The operator's configuration moves to the cmdline**, read with
-`Cubi.Cmdline`:
-
-| Argument | What | Read by |
-| --- | --- | --- |
-| `cubi.rootfs=sha256:<hex>` | the SHA-256 of `rootfs.squashfs` | stage-1, before `losetup`: a mismatch prints `cubi stage-1: rootfs hash mismatch` and reboots, like any stage-1 failure ([§2.4](specs.md)) |
-| `cubi.ca=sha256:<hex>` | the SHA-256 of the operator's root certificate (DER) | `Cubi.Deploy`, when verifying a release ([§2.11.4](specs.md) step 1) |
-| `cubi.ssh=<type>:<base64>` | one ssh authorized key, repeatable; the space of the `authorized_keys` line becomes `:`, the comment is dropped | `config/runtime.exs`, into `nerves_ssh`'s `authorized_keys` |
-
-- **A pin, not the certificate.** An RSA-3072 root is ~0.9 KB of DER, ~1.2 KB
-  in base64, out of x86's 2048-byte `COMMAND_LINE_SIZE`, which phase 7's
-  `cubi.join=` and §2.10.3's `cubi.vdevs=` also need. So the cmdline pins the
-  root's fingerprint, and the certificate travels **in the release archive**:
-  `mix cubi.sign` adds `ca.pem` next to `signer.pem`. Step 1 of
-  [§2.11.4](specs.md) becomes: the trusted root is `/etc/cubi/ca.pem` if the
-  image has one, else the archive's `ca.pem` if its SHA-256 equals
-  `cubi.ca=`. If the image has a CA *and* the cmdline pins one, they must be
-  the same certificate, or every release is refused (logged at boot). With
-  neither, every release is refused, as in milestone 1.
-- **Nothing in the script is secret.** `/proc/cmdline` is world-readable and
-  that is fine for a fingerprint, a hash and public keys. The script is
-  **private because it is the trust anchor**: whoever writes it decides what
-  the node runs and who may log in. It therefore travels only through the
-  provider's authenticated API (user data, a stored PXE script), never at a
-  public or guessable URL. A provider that can only boot a script from a URL
-  is out of scope. Tokens stay off the cmdline in phase 7, as
-  [§2.8.2](specs.md) says.
-- **What the chain rests on.** A cloud's iPXE is stock, so it cannot
-  `imgverify` against any of our CAs. The kernel and stage-1 are protected by
-  HTTPS to the publisher only (stock iPXE checks the web PKI through its
-  cross-signed root **(verify)**). From stage-1 on, the private script's pins
-  take over: the rootfs by hash, releases by CA. Closing the first gap needs
-  a cubi-built iPXE per provider image ([questions.md](questions.md)).
-- **No `cubi.ssh=`, no ssh.** The node then accepts no login, and so no
-  deploy. The render task refuses to write such a script unless `--no-ssh`.
-- `mix cubi.boot_script` refuses a cmdline over 2048 bytes rather than let the
-  kernel truncate it silently.
-
-**`Cubi.Provider`**, in `apps/cubi_tools`:
-
-```elixir
-@callback init(opts :: keyword()) :: {:ok, state} | {:error, term()}
-@callback create(state, spec()) :: {:ok, Cubi.Provider.Instance.t()} | {:error, term()}
-@callback list(state) :: {:ok, [Cubi.Provider.Instance.t()]} | {:error, term()}
-@callback get(state, name :: String.t()) :: {:ok, Cubi.Provider.Instance.t()} | {:error, :not_found | term()}
-@callback set_script(state, Cubi.Provider.Instance.t(), script :: String.t()) :: :ok | {:error, term()}
-@callback reboot(state, Cubi.Provider.Instance.t()) :: :ok | {:error, term()}
-@callback destroy(state, Cubi.Provider.Instance.t()) :: :ok | {:error, term()}
-```
-
-- `spec()` is `%{name, script, size, region, firmware: :bios | :uefi}`;
-  `size` and `region` are the provider's own strings, passed through.
-  `Instance` is `%{id, name, status, addresses, provider: map()}`.
-- **The provider is the inventory.** Instances are named and tagged `cubi`;
-  `list/1` returns only those. No local state file to lose or get out of step.
-  Names are unique per provider: `create/2` on a taken name is an error.
-- **The script goes in as content**, never as a URL (above). Whatever the
-  provider stores alongside (a startup script object, user data) is removed by
-  `destroy/2`.
-- **Credentials come from the environment**, never from a config file:
-
-  ```elixir
-  # the operator's project, config/config.exs
-  config :cubi_tools, :providers,
-    qemu: {Cubi.Provider.Qemu, []},
-    vultr: {Cubi.Provider.Vultr, api_key: {:env, "VULTR_API_KEY"}, region: "cdg", size: "vc2-1c-1gb"}
-  ```
-
-- **Upgrade is still a reboot** ([§2.7](specs.md)): `set_script/3` with the new
-  version's URL and rootfs hash, then `reboot/2`. A provider that must stop
-  the instance to change its script does so inside `set_script/3`. Instances
-  are diskless, so a reboot drops the deployed release
-  ([§2.11.6](specs.md)) and the operator deploys it again.
-
-Providers in this milestone: **`Cubi.Provider.Qemu`**, local, for development
-and for the harness (state under `_build/cubi/qemu/<name>/`, the script served
-to iPXE the way phase 4's tests do), and **one cloud, Vultr**, whose API stores
-a `pxe` startup script and boots an instance from it **(verify)**. AWS (the
-ipxe.org EC2 image, which runs its user data as the script **(verify)**) is the
-natural second, and needs the `ena` and `nvme` drivers in the kernel.
-
-**Mix tasks**, all in `apps/cubi_tools`:
-
-| Task | Does |
-| --- | --- |
-| `mix cubi.boot_script [--image <version\|url>] [--ca <dir>] [--ssh <file>…]` | renders the private script to stdout: fetches `SHA256SUMS` for the rootfs pin, computes the CA's fingerprint, reads the ssh public keys (default `~/.ssh/id_*.pub`). The provisioning tasks call the same `Cubi.Tools.BootScript` |
-| `mix cubi.provision <name> --provider <p> [--size] [--region] [--image]` | renders, `create/2`, waits until the instance runs and answers ssh, prints its addresses and the CA fingerprint it pins |
-| `mix cubi.instances [--provider <p>]` | `list/1`: name, status, addresses, image version |
-| `mix cubi.upgrade <name> --image <version>` | `set_script/3` + `reboot/2`, waits for ssh, checks the node reports the new version's firmware UUID |
-| `mix cubi.destroy <name> [--yes]` | `destroy/2`, after confirmation |
-
-`--image` defaults to the version matching `cubi_tools`', at the project's
-release URL (`config :cubi_tools, :image_base`). `mix cubi.deploy <name>
---provider <p>` resolves the name through `get/2` instead of taking a host.
+Specified in [specs.md §2.12](specs.md): the public images (§2.12.1), the
+private script and its cmdline pins (§2.12.2), the `Cubi.Provider` behaviour
+and its providers (§2.12.3), and the Mix tasks (§2.12.4). It amends
+[§2.4](specs.md) (the rootfs hash check in stage-1), [§2.11.2](specs.md),
+[§2.11.3](specs.md) (`--base` takes a URL) and [§2.11.4](specs.md) step 1 (the
+trusted root is `/etc/cubi/ca.pem` or the archive's `ca.pem` pinned by
+`cubi.ca=`). Its open points are in [questions.md](questions.md), and its
+**(verify)** points in [phase 0](phase0.md).
 
 ## Checklist
 
-- [ ] [specs.md](specs.md) §2.12 *Cloud instances* from the design above; §2.11.2 and §2.11.4 step 1 amended for `cubi.ca=` and the archive's `ca.pem`; README gains "Run it in the cloud"; [questions.md](questions.md) gets the open points; the **(verify)** points go into [phase 0](phase0.md).
+- [x] [specs.md](specs.md) §2.12 *Cloud instances*; §2.11.2 and §2.11.4 step 1 amended for `cubi.ca=` and the archive's `ca.pem`; README gains "Run it in the cloud"; [questions.md](questions.md) gets the open points; the **(verify)** points go into [phase 0](phase0.md).
+      §2.12 in four parts (public images, the script and its cmdline, `Cubi.Provider`, the tasks). Also amended: §2.3 (`--public`), §2.4 (stage-1 checks `cubi.rootfs=` as its new step 2), §2.11.3 (`--base` takes a URL, checked against `SHA256SUMS`), §2.11.4 (`ca.pem` as a third signed member, allowed by step 3), §2.11.5 (authorized keys from `cubi.ssh=`). The open points (first hop of the boot, where images are hosted, cloud storage nodes) and the three **(verify)** checks were already in place.
 - [ ] Stage-1: `cubi.rootfs=sha256:` checked with busybox `sha256sum` before `losetup`; absent = no check, with a console warning. The C stage-1 of [phase 5](phase5.md) inherits it.
 - [ ] Node: `cubi.ssh=` into `nerves_ssh`'s authorized keys from `config/runtime.exs`; `cubi.ca=` read by the release verification, with the archive's `ca.pem` ([§2.11.4](specs.md)). `Cubi.Pki.Archive.verify` takes the trusted root as an argument rather than reading `/etc/cubi/ca.pem`.
 - [ ] `mix cubi.sign` adds `ca.pem` (the signer directory's root) to the archive; `Cubi.Pki.Archive` accepts it as a known member.

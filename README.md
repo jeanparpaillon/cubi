@@ -40,13 +40,42 @@ send it over ssh (`mix cubi.deploy <node>`). The node checks the signature
 against the CA built into its image, starts the release, and goes back to the
 previous one if it crashes ([docs/specs.md](docs/specs.md) §2.11).
 
+### Run it in the cloud
+
+*[Milestone 2](docs/milestone2.md), not built yet.*
+
+You don't need to build an image to run cubi on a cloud VM, a VPS or a rented
+server. The cubi project publishes one kernel, stage-1 and rootfs per version,
+the same for everyone, with no CA and no ssh key inside. What makes a node
+yours is a short private iPXE script, handed to the provider through its API:
+
+```ipxe
+#!ipxe
+set base https://…/cubi/<version>
+kernel ${base}/vmlinuz console=ttyS0 cubi.rootfs=sha256:<hex> cubi.ca=sha256:<hex> cubi.ssh=ssh-ed25519:<base64>
+initrd ${base}/stage1.cpio.zst
+initrd ${base}/rootfs.squashfs /rootfs.squashfs
+boot
+```
+
+The script pins the rootfs by its hash and your CA by its fingerprint, and
+names the ssh keys allowed to log in. None of that is secret, but whoever
+writes the script decides what the node runs, so it never sits at a public URL.
+
+`mix cubi.provision <name> --provider vultr` renders the script, creates the
+instance and waits for ssh; `mix cubi.deploy <name> --provider vultr` then
+deploys your signed release as above. `mix cubi.instances`, `mix cubi.upgrade`
+(a reboot onto another version) and `mix cubi.destroy` do the rest. Providers
+sit behind a `Cubi.Provider` behaviour: QEMU locally, and Vultr first among
+the clouds ([docs/specs.md](docs/specs.md) §2.12).
+
 ## Is it for you?
 
 cubi is a good fit when:
 
 - your workloads are BEAM releases, such as Elixir, Erlang or Gleam apps;
 - you run on machines you control (bare metal, or VMs that can boot over the
-  network);
+  network), or on cloud instances that boot an iPXE script;
 - you prefer a few things you understand well to a large platform.
 
 ## Quickstart

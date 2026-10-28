@@ -8,7 +8,7 @@ defmodule Mix.Tasks.Cubi.E2e.Ipxe do
       Ubuntu host; elsewhere, set `CUBI_E2E_IPXE_EFI` to any x86_64 `ipxe.efi`.
     * **trusted** - builds cubi's own iPXE (`mix cubi.ipxe`) trusting only
       the test CA (`mix cubi.e2e.key` first) into `priv/ipxe/trusted/`.
-      Rebuilt when the test CA changes.
+      Rebuilt when the test CA or the build settings change.
   """
   use Mix.Task
 
@@ -24,8 +24,7 @@ defmodule Mix.Tasks.Cubi.E2e.Ipxe do
 
     if not File.regular?(ca), do: Mix.raise("no #{ca}: run `mix cubi.e2e.key` first")
 
-    if File.read(Path.join(out, "ca.pem")) == {:ok, File.read!(ca)} and
-         Enum.all?(Cubi.Tools.Ipxe.targets(), &File.regular?(Path.join(out, &1))) do
+    if Cubi.Tools.Ipxe.up_to_date?(out, ca) do
       Mix.shell().info("Already there: #{out}")
     else
       Mix.Task.run("cubi.ipxe", ["--ca", ca, "--out", out])

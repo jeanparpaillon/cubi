@@ -157,9 +157,10 @@ defmodule Cubi.Tools.Release do
           files: files
         })
 
-      write_archive!(Keyword.fetch!(opts, :output), [
-        {"manifest.json", [:json.format(manifest), "\n"]} | Enum.sort(files)
-      ])
+      Cubi.Pki.Archive.write!(
+        Keyword.fetch!(opts, :output),
+        Map.put(files, "manifest.json", IO.iodata_to_binary([:json.format(manifest), "\n"]))
+      )
 
       {:ok, %{plan: plan, dropped_config: dropped}}
     end
@@ -197,16 +198,5 @@ defmodule Cubi.Tools.Release do
 
   defp sys_config(config) do
     "%% coding: utf-8\n" <> :unicode.characters_to_binary(:io_lib.format(~c"~tp.~n", [config]))
-  end
-
-  defp write_archive!(path, entries) do
-    File.mkdir_p!(Path.dirname(path))
-
-    :ok =
-      :erl_tar.create(
-        String.to_charlist(path),
-        for({name, data} <- entries, do: {String.to_charlist(name), IO.iodata_to_binary(data)}),
-        [:compressed]
-      )
   end
 end

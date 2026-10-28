@@ -35,11 +35,13 @@ ssh (§2.11.5), loading on the node (§2.11.6) and rollback through shoehorn
       `--dir`, `--name`, `--signer-only`; prints the root's SHA-256 fingerprint. The default directory is `Cubi.Pki.dir/1`, shared with the tasks to come.
 - [x] Firmware: `/etc/cubi/ca.pem` copied into the rootfs from the configured CA (`config :cubi_fw, :ca_cert`); `mix firmware.ipxe --signer <dir>` writes the three `.sig` files and `base.json` ([§2.11.2](specs.md), [§2.11.3](specs.md)).
       Added to the served rootfs by `Cubi.Ipxe`, like `/etc/firmware.kv`. `mix cubi.e2e.key` now also creates the test CA (pulled forward from the harness step), and `MIX_ENV=e2e` builds are signed by it; `apps/cubi_e2e/test/phase3_firmware_ipxe_test.exs` checks the signatures, the CA in the rootfs and `base.json`.
-- [ ] Custom iPXE with `TRUST=` the CA and `imgverify` on the three images, and `mix firmware.ipxe --imgverify` rendering `boot.ipxe` with the `imgverify` lines. Pulled forward from [phase 5](phase5.md); the rest of phase 5 (HTTPS, per-node scripts, C stage-1) stays there.
-      Written: `mix cubi.ipxe` (`Cubi.Tools.Ipxe`), `--imgverify`, the harness's `ipxe: :trusted` VMs, built by `mix cubi.e2e.ipxe`, and `apps/cubi_e2e/test/milestone1_imgverify_test.exs`. **Not yet run:** the iPXE build has not been run here.
+- [x] Custom iPXE with `TRUST=` the CA and `imgverify` on the three images, and `mix firmware.ipxe --imgverify` rendering `boot.ipxe` with the `imgverify` lines. Pulled forward from [phase 5](phase5.md); the rest of phase 5 (HTTPS, per-node scripts, C stage-1) stays there.
+      Written: `mix cubi.ipxe` (`Cubi.Tools.Ipxe`), `--imgverify`, the harness's `ipxe: :trusted` VMs, built by `mix cubi.e2e.ipxe`, and `apps/cubi_e2e/test/milestone1_imgverify_test.exs`.
+      Validated on 2026-10-28 with iPXE 2.0.0: BIOS and UEFI boot the signed directory; a one-byte change to the rootfs, another CA's signatures and a stock iPXE are all refused. The build needs `CERT=` the root besides `TRUST=` ([§2.11.2](specs.md)).
 - [x] `mix cubi.release`: from a user's Mix project, build the release with the base image's OTP, drop the applications the base image already ships (`--base <ipxe dir>`, from its `base.json`), write the archive with `manifest.json` ([§2.11.3](specs.md)).
       `Cubi.Tools.Release`. OTP's applications are never shipped (the host's patch version differs from the system's: 29.0.3 against 29.0.2 here); the image's others become the manifest's `requires`. Only the shipped applications' config is kept. Checked on `examples/cubi_hello` against the e2e image: ships Bandit, Plug, `eex` and their deps, requires `elixir`, `logger`, `iex`.
-- [ ] `mix cubi.sign <archive>`: add `manifest.sig` and `signer.pem` in place.
+- [x] `mix cubi.sign <archive>`: add `manifest.sig` and `signer.pem` in place.
+      `Cubi.Pki.Archive` in `apps/cubi_pki` holds the archive format for both sides: read (regular files with safe paths only), write, sign, and verify = [§2.11.4](specs.md) steps 1–3, which the node step reuses. Checked on `examples/cubi_hello`.
 - [ ] Node: `cubi_deploy` ssh subsystem → verify, check OTP and app conflicts, unpack to `/cubi/releases/<version>/`, then `Cubi.Deploy.install/1`: stop `current`, load and start the new one, wait the settle period, `current` → `previous` ([§2.11.5](specs.md), [§2.11.6](specs.md)). `<pool>/cubi/releases` on storage nodes, a tmpfs on `/cubi` on diskless ones.
 - [ ] `mix cubi.deploy <node>`: stream the archive over ssh (`--port`, `--identity`), print the node's verdict, non-zero exit on refusal or rollback.
 - [ ] `Cubi.Deploy.ShoehornHandler` and the rollback path; `state.json` with `current`, `previous` and `bad` ([§2.11.7](specs.md)).
@@ -61,4 +63,4 @@ ssh (§2.11.5), loading on the node (§2.11.6) and rollback through shoehorn
 
 ---
 
-Previous: [phase 6](phase6.md) · Next: [phase 7](phase7.md)
+Previous: [phase 6](phase6.md) · Next: [milestone 2](milestone2.md)

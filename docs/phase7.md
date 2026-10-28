@@ -30,4 +30,4 @@ Part of the cubi node boot plan: design in [specs.md](specs.md), open questions 
 
 ---
 
-Previous: [phase 6](phase6.md) · Next: [phase 8](phase8.md)
+Previous: [milestone 2](milestone2.md) · Next: [phase 8](phase8.md)

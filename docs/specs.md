@@ -899,10 +899,13 @@ what the old one signed; rotating the root does, at the cost of new images.
   server renders its own per-node scripts (§2.7) with the same lines.
 - **`mix cubi.ipxe`** (in `apps/cubi_tools`) builds that iPXE: the v2.0.0
   release tarball, pinned by SHA-512 and cached in `~/.cache/cubi/`, built
-  with `TRUST=<ca.pem>` and `IMAGE_TRUST_CMD`, into `undionly.kpxe` (BIOS
+  with `TRUST=<ca.pem>`, `CERT=<ca.pem>` and `IMAGE_TRUST_CMD`, into `undionly.kpxe` (BIOS
   chainload), `ipxe.efi` (UEFI chainload) and `1af41000.rom` (QEMU's
   virtio-net option ROM, for the harness). iPXE 2.0.0 verifies RSA and ECDSA
-  (P-256, P-384) and requires `codeSigning` on the signer. `TRUST=` is its
+  (P-256, P-384) and requires `codeSigning` on the signer. `TRUST=` embeds
+  only the root's fingerprint and a signature carries only the signer, so the
+  root certificate itself goes in with `CERT=`; without it `imgverify` fails
+  with "No usable certificates" (`0216eb3c`). `TRUST=` is its
   only root for HTTPS too, so an HTTPS boot server ([phase 5](phase5.md))
   needs a certificate from the same root, or a second `TRUST=` entry.
 - e2e images are signed with a test CA that `mix cubi.e2e.key` creates next to
@@ -975,7 +978,13 @@ releases/<version>/sys.config     build-time configuration
 `manifest.json` with `signer.key` (RSA, SHA-256, `:public_key.sign/3`) and adds
 two members to the archive in place, the way `mix firmware.sign` rewrites the
 `.fw`: `manifest.sig` (the raw signature) and `signer.pem`. Signing an archive
-that is already signed replaces both.
+that is already signed replaces both. `--signer` defaults to `Cubi.Pki.dir/1`,
+the archive to the newest in `_build/<env>/cubi/`. Signing vouches for the
+files, so it first checks them against the manifest (step 3 below) and refuses
+on any difference; once signed, the archive is verified as a node would, signer
+dates included, before it is written. The archive code (`Cubi.Pki.Archive`:
+read, write, sign, verify) is in `apps/cubi_pki`, shared by the host tasks and
+the node.
 
 The manifest hashes every file, so one signature covers the archive. The bytes
 are signed as they are: there is no canonical JSON to agree on.
@@ -1099,5 +1108,6 @@ One file per phase. Phases run in order; each ends with its acceptance, automate
 | [5](phase5.md) | hardened boot chain |
 | [6](phase6.md) | storage |
 | [M1](milestone1.md) | signed releases on standalone nodes, no distribution (§2.11) |
+| [M2](milestone2.md) | cloud instances from public images and a private iPXE script |
 | [7](phase7.md) | plug into cubi |
 | [8](phase8.md) | real hardware |

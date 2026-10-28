@@ -18,8 +18,9 @@ defmodule Cubi.E2E.Milestone1ImgverifyTest do
 
   @images ~w(vmlinuz stage1.cpio.zst rootfs.squashfs)
 
-  # What iPXE prints when imgverify fails, whatever the reason.
-  @refused ~r/Could not verify/
+  # What iPXE prints when imgverify fails, whatever the reason; a stock build
+  # without IMAGE_TRUST_CMD (Ubuntu's) does not even have the command.
+  @refused ~r/Could not verify|imgverify: command not found/
 
   setup_all do
     {:ok, served: Artifacts.served_dir!()}

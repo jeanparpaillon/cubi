@@ -59,14 +59,11 @@ defmodule Cubi.Storage.ArgsTest do
 
   test "pool names follow zpool's rules" do
     for name <- ~w(1pool p/ool -p),
-        do:
-          assert({:error, {:zpool, :invalid, ^name}} = parse("cubi.vdevs=a cubi.zpool=#{name}"))
+        do: assert({:error, {:zpool, :invalid, ^name}} = parse("cubi.vdevs=a cubi.zpool=#{name}"))
 
     for name <- ~w(mirror log raidz2x draidz c0d0),
         do:
-          assert(
-            {:error, {:zpool, :reserved, ^name}} = parse("cubi.vdevs=a cubi.zpool=#{name}")
-          )
+          assert({:error, {:zpool, :reserved, ^name}} = parse("cubi.vdevs=a cubi.zpool=#{name}"))
 
     assert {:error, {:zpool, :invalid, nil}} = parse("cubi.vdevs=a cubi.zpool")
 

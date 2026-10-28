@@ -181,6 +181,7 @@ Each phase ends with an acceptance test, automated as described in
 | [5](docs/phase5.md) | Hardened boot chain |
 | [6](docs/phase6.md) | Storage: ZFS and Khepri |
 | [M1](docs/milestone1.md) | Signed releases deployed to standalone nodes, no distribution |
+| [M2](docs/milestone2.md) | Cloud instances from public images, a private iPXE script and `Cubi.Provider` |
 | [7](docs/phase7.md) | Plug into cubi: join, leave, membership |
 | [8](docs/phase8.md) | Real hardware |
 

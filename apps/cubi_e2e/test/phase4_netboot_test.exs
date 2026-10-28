@@ -36,7 +36,8 @@ defmodule Cubi.E2E.Phase4NetbootTest do
           boot: {:pxe, unquote(protocol), context.served}
         })
 
-      Console.await(vm, ~r/rootfs\.squashfs\.\.\. ok/, 60_000)
+      # iPXE shows a percentage before "ok" when the download is slow.
+      Console.await(vm, ~r/rootfs\.squashfs\.\.\.[^\n]*ok/, 60_000)
       Console.await(vm, ~r/Interactive Elixir/, 60_000)
 
       assert Node.eval(vm, ~S"""

@@ -8,10 +8,15 @@ defmodule Cubi.Tools.Ipxe do
   directory of its own there, so later builds are incremental; iPXE's
   makefile rebuilds what depends on `TRUST=` when the CA changes.
 
-  Two settings differ from a stock build:
+  Three settings differ from a stock build:
 
     * `TRUST=<ca.pem>` - the only root iPXE trusts, for `imgverify` and for
-      HTTPS alike. Without it, iPXE trusts its own project CA.
+      HTTPS alike. Without it, iPXE trusts its own project CA. This embeds
+      the root's fingerprint only.
+    * `CERT=<ca.pem>` - the root certificate itself, in iPXE's certificate
+      store. A signature carries only the signer's certificate, and without
+      the root in the store iPXE cannot build the chain: `imgverify` fails
+      with "No usable certificates" (`0216eb3c`).
     * `IMAGE_TRUST_CMD` in `config/local/general.h` - the `imgverify` and
       `imgtrust` commands, off by default.
 
@@ -74,12 +79,35 @@ defmodule Cubi.Tools.Ipxe do
 
     File.mkdir_p!(output)
     File.cp!(ca, Path.join(output, "ca.pem"))
+    File.write!(Path.join(output, "BUILD"), build_info(targets, ca))
 
     for target <- targets do
       dest = Path.join(output, target)
       File.cp!(Path.join(src, Map.fetch!(@targets, target)), dest)
       dest
     end
+  end
+
+  @doc """
+  Whether `output` holds a build of `targets` for `ca` with the current
+  version and settings: what `build!/1` would produce.
+  """
+  @spec up_to_date?(Path.t(), Path.t(), [String.t()]) :: boolean()
+  def up_to_date?(output, ca, targets \\ targets()) do
+    File.read(Path.join(output, "BUILD")) == {:ok, build_info(targets, ca)} and
+      File.read(Path.join(output, "ca.pem")) == File.read(ca) and
+      Enum.all?(targets, &File.regular?(Path.join(output, &1)))
+  end
+
+  # What a build depends on besides the CA's content: the source and the make
+  # arguments, with the CA path left out.
+  @doc false
+  @spec build_info([String.t()], Path.t()) :: String.t()
+  def build_info(targets, ca) do
+    args =
+      targets |> make_args(ca, 1) |> Enum.drop(1) |> Enum.map(&String.replace(&1, ca, "<ca>"))
+
+    "ipxe #{@version} #{@sha512}\n#{Enum.join(args, " ")}\n#{@general_h}"
   end
 
   @doc false
@@ -93,7 +121,7 @@ defmodule Cubi.Tools.Ipxe do
 
     # NO_WERROR: iPXE's -Werror trips on warnings newer compilers add; the
     # source is pinned, so a warning is never ours to fix.
-    ["-j#{jobs}" | paths] ++ ["TRUST=#{ca}", "NO_WERROR=1"]
+    ["-j#{jobs}" | paths] ++ ["TRUST=#{ca}", "CERT=#{ca}", "NO_WERROR=1"]
   end
 
   @doc false

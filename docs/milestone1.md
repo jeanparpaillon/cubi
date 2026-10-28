@@ -29,7 +29,8 @@ ssh (§2.11.5), loading on the node (§2.11.6) and rollback through shoehorn
 ## Checklist
 
 - [x] [specs.md](specs.md) §2.11 *Releases on a running node* ; README: "Deploy and upgrade" gains the in-place path; [questions.md](questions.md) gets the open points. The two **(verify)** points are in [phase 0](phase0.md).
-- [ ] `apps/kubex_pki`: CA and signer generation, CMS signing for the boot images (shells out to `openssl` on the host), manifest signing and verification with `:public_key`. Host and target; unit-tested on the host.
+- [x] `apps/kubex_pki`: CA and signer generation, CMS signing for the boot images (shells out to `openssl` on the host), manifest signing and verification with `:public_key`. Host and target; unit-tested on the host.
+      `Kubex.Pki` (`gen_ca!/2`, `gen_signer!/2`, `sign/2`, `verify/5` = [§2.11.4](specs.md) steps 1–2), `Kubex.Pki.Cms` (`sign!/2`, `verify/3`). The archive checks (steps 3–5) belong to the node step.
 - [ ] `mix kubex.gen_ca` (in a host-only `apps/kubex_tools`, which user projects add as a `runtime: false` dependency, as `kubex_fw` does with `kubex_ipxe`).
 - [ ] Firmware: `/etc/kubex/ca.pem` copied into the rootfs from the configured CA (`config :kubex_fw, :ca_cert`); `mix firmware.ipxe --signer <dir>` writes the three `.sig` files and `base.json` ([§2.11.2](specs.md), [§2.11.3](specs.md)).
 - [ ] Custom iPXE with `TRUST=` the CA and `imgverify` on the three images, and `mix firmware.ipxe --imgverify` rendering `boot.ipxe` with the `imgverify` lines. Pulled forward from [phase 5](phase5.md); the rest of phase 5 (HTTPS, per-node scripts, C stage-1) stays there.

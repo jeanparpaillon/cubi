@@ -5,10 +5,10 @@
 # host-only and is never part of the firmware.
 import Config
 
-# Enable the Nerves integration with Mix. Not in kubex_e2e: nerves_bootstrap
-# refuses to start in a project without a :nerves dependency, and the harness
-# is host-only, so it has none.
-if Mix.Project.config()[:app] != :kubex_e2e do
+# Enable the Nerves integration with Mix. Not in kubex_e2e or kubex_pki:
+# nerves_bootstrap refuses to start in a project without a :nerves dependency,
+# and neither has one (the harness is host-only, the PKI a plain library).
+if Mix.Project.config()[:app] not in [:kubex_e2e, :kubex_pki] do
   Application.start(:nerves_bootstrap)
 end
 

@@ -46,4 +46,5 @@
   "vintage_net_ethernet": {:hex, :vintage_net_ethernet, "0.11.2", "ef67db5ace9ad5ca5bf229a507247f9eb45b847dc0ff694a6e8a156ed9c5915d", [:mix], [{:vintage_net, "~> 0.12.0 or ~> 0.13.0", [hex: :vintage_net, repo: "hexpm", optional: false]}], "hexpm", "6915f9e15e1aa15e52d1948f318ce5109181d1ad7aaa50016bad5dd8e22df9ea"},
   "vintage_net_wifi": {:hex, :vintage_net_wifi, "0.12.12", "64a75e6dc4a56cc28fa93e9cf64a0ffd0e4622718835d29a11dcb6d145284720", [:make, :mix], [{:elixir_make, "~> 0.6", [hex: :elixir_make, repo: "hexpm", optional: false]}, {:vintage_net, "~> 0.12.0 or ~> 0.13.0", [hex: :vintage_net, repo: "hexpm", optional: false]}], "hexpm", "5f179c6cbb2b48eadc83e3cd15b42d8d87007be0053f2d5b5f7b201a492f1afc"},
   "websock": {:hex, :websock, "0.5.3", "2f69a6ebe810328555b6fe5c831a851f485e303a7c8ce6c5f675abeb20ebdadc", [:mix], [], "hexpm", "6105453d7fac22c712ad66fab1d45abdf049868f253cf719b625151460b8b453"},
+  "x509": {:hex, :x509, "0.9.2", "a75aa605348abd905990f3d2dc1b155fcde4e030fa2f90c4a91534405dce0f6e", [:mix], [], "hexpm", "4c5ede75697e565d4b0f5be04c3b71bb1fd3a090ea243af4bd7dae144e48cfc7"},
 }

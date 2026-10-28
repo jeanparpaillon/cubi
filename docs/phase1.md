@@ -26,10 +26,11 @@ Part of the kubex node boot plan: design in [specs.md](specs.md), open questions
 Validated on 2026-10-27, by hand on the `MIX_ENV=dev` image and by
 `apps/kubex_e2e/test/phase1_direct_boot_test.exs` (BIOS and UEFI) on the e2e one.
 `/` is the squashfs on `/dev/loop0`, mounted `ro`, and `/root` is a tmpfs.
-`firmware_valid?/0` is true only by default, though: the stock
-`UBootEnv` KV backend finds no environment on a diskless boot, so the KV is
-empty and nothing marks the image invalid. It becomes meaningful with the
-seeded InMemory KV ([§2.6](specs.md), phases [2](phase2.md)–[3](phase3.md)).
+`firmware_valid?/0` was true only by default at the time: the stock
+`UBootEnv` KV backend finds no environment on a diskless boot, so the KV was
+empty and nothing marked the image invalid. Since [phase 3](phase3.md), tests
+boot what `mix firmware.ipxe` serves, whose KV is seeded, and
+`firmware_validation_status/0` is `:validated` ([§2.6](specs.md)).
 
 ---
 

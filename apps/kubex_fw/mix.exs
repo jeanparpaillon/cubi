@@ -39,6 +39,8 @@ defmodule KubexFw.MixProject do
     [
       # Dependencies for all targets
       {:nerves, "~> 1.13", runtime: false},
+      # `mix firmware.ipxe` (docs/specs.md §2.3); build-time only.
+      {:kubex_ipxe, in_umbrella: true, runtime: false},
       {:shoehorn, "~> 0.9.1"},
       {:logger_backends, "~> 1.0"},
       {:ring_logger, "~> 0.11.0"},

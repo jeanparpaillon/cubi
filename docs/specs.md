@@ -86,13 +86,20 @@ stage1.cpio.zst  (built once, by the system)
 ```
 
 The `.fw` has no kernel resource: GRUB loads `/boot/bzImage` from the rootfs
-partition, so the kernel is only inside the squashfs ([phase 0](phase0.md)). A
-`mix firmware.ipxe` task (in a small `kubex_ipxe` Mix dep, or in the fw app
-first) unzips `data/rootfs.img`, takes the kernel out of it with `unsquashfs
--cat rootfs.img boot/bzImage`, copies `stage1.cpio.zst` out of the system
-artifact directory, writes a `boot.ipxe`, and puts everything in
-`_build/<target>_<env>/ipxe/`. The kernel then ships twice, 5.3 MB of it inside
-the squashfs, until the system fork drops `/boot` from the rootfs.
+partition, so the kernel is only inside the squashfs ([phase 0](phase0.md)). The
+`mix firmware.ipxe` task (umbrella app `kubex_ipxe`, a build-time dependency of
+the firmware app) runs `mix firmware`, then:
+
+- unzips `data/rootfs.img` and takes the kernel out of it with `unsquashfs
+  -cat rootfs.img boot/bzImage`;
+- appends `/firmware.kv` to that squashfs with `mksquashfs` (the firmware
+  metadata, §2.6);
+- copies `stage1.cpio.zst` out of the system artifact;
+- writes a generic `boot.ipxe` with relative URLs, so the directory can be
+  served from anywhere, and `SHA256SUMS`;
+
+all into `_build/<target>_<env>/ipxe/`. The kernel ships twice, 5.7 MB of it
+inside the squashfs, until the system fork drops `/boot` from the rootfs.
 
 ### 2.4 Stage-1 init
 
@@ -159,10 +166,16 @@ its only module is `efivarfs` ([phase 0](phase0.md) has the table). On top of it
   cluster identity, which is the certificate assigned on join (§2.8). The MAC
   fallback only sees NICs whose driver is built in: erlinit runs the script
   before anything loads modules.
-- `config :nerves_runtime, kv_backend: {Nerves.Runtime.KVBackend.InMemory,
-  contents: %{…}}`, filled at build time with `nerves_fw_active`,
-  `a.nerves_fw_version`, `a.nerves_fw_uuid` …, and `nerves_fw_validated: "1"`.
-  This keeps `Nerves.Runtime.firmware_valid?/0` and friends truthful.
+- `Nerves.Runtime.KVBackend.InMemory`, seeded with what `fwup` writes into the
+  boot environment on a disk install: `nerves_fw_active`, `a.nerves_fw_version`,
+  `a.nerves_fw_uuid` …, plus `nerves_fw_validated: "1"`. This keeps
+  `Nerves.Runtime.firmware_valid?/0` and friends truthful. The UUID only exists
+  once the `.fw` is built, after its squashfs is sealed, so it can't be in the
+  release's config. `mix firmware.ipxe` appends it to the served squashfs as
+  `/firmware.kv` (`key=value` lines; at the root, because a squashfs append
+  cannot add to an existing directory), and `config/runtime.exs` loads it at
+  boot. The served squashfs then describes itself, under the same signature
+  (§2.7).
 - Remove `ssh_subsystem_fwup` from the target deps. `mix upload` has nothing to
   write to, and a half-working update path is worse than none.
 

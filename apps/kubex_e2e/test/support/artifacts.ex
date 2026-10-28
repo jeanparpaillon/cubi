@@ -2,12 +2,14 @@ defmodule Kubex.E2E.Artifacts do
   @moduledoc """
   The images e2e tests boot, located once per test run.
 
-    * `kernel!/0` and `stage1!/1` - from the `kubex_system_x86_64` artifact's
-      `images/`: built locally by `kubex_fw` (`nerves: [compile: true]`), or
-      downloaded into `~/.nerves/artifacts`. `KUBEX_E2E_KERNEL` overrides the
-      kernel.
-    * `rootfs!/0` - `data/rootfs.img` from the umbrella's `MIX_ENV=e2e`
-      firmware, `_build/x86_64_e2e/nerves/images/kubex_fw.fw`.
+    * `kernel!/0`, `stage1!/0` and `rootfs!/0` - the directory a boot server
+      serves, `_build/x86_64_e2e/ipxe/`, from
+      `MIX_TARGET=x86_64 MIX_ENV=e2e mix firmware.ipxe` in apps/kubex_fw
+      (docs/specs.md §2.3). Tests boot exactly what is served.
+      `KUBEX_E2E_KERNEL` overrides the kernel.
+    * `stage1!(:dev)` - from the `kubex_system_x86_64` artifact's `images/`
+      (built by `kubex_fw`, or downloaded into `~/.nerves/artifacts`): it is
+      never served.
   """
 
   @system "kubex_system_x86_64"
@@ -15,7 +17,7 @@ defmodule Kubex.E2E.Artifacts do
   @spec kernel!() :: Path.t()
   def kernel!() do
     case System.get_env("KUBEX_E2E_KERNEL") do
-      nil -> image!("bzImage")
+      nil -> served!("vmlinuz")
       path -> Path.expand(path)
     end
   end
@@ -33,28 +35,27 @@ defmodule Kubex.E2E.Artifacts do
   end
 
   @spec rootfs!() :: Path.t()
-  def rootfs!() do
-    once({:rootfs}, fn ->
-      fw = Path.join([root(), "_build", "x86_64_e2e", "nerves", "images", "kubex_fw.fw"])
+  def rootfs!(), do: served!("rootfs.squashfs")
 
-      if not File.exists?(fw),
-        do: raise("no #{fw}: run `MIX_TARGET=x86_64 MIX_ENV=e2e mix firmware` in apps/kubex_fw")
+  @doc "The served directory itself (`mix firmware.ipxe`'s output)."
+  @spec served_dir!() :: Path.t()
+  def served_dir!() do
+    dir = Path.join([root(), "_build", "x86_64_e2e", "ipxe"])
 
-      out = Path.join(dir(), "rootfs.squashfs")
+    if not File.exists?(Path.join(dir, "boot.ipxe")),
+      do:
+        raise("no #{dir}: run `MIX_TARGET=x86_64 MIX_ENV=e2e mix firmware.ipxe` in apps/kubex_fw")
 
-      {:ok, [{_, data}]} =
-        :zip.unzip(String.to_charlist(fw), [:memory, file_list: [~c"data/rootfs.img"]])
-
-      File.write!(out, data)
-      out
-    end)
+    dir
   end
 
   @doc "The stage-1 initramfs built by the system (docs/specs.md §2.4)."
   @spec stage1!(:prod | :dev) :: Path.t()
   def stage1!(mode \\ :prod)
-  def stage1!(:prod), do: image!("stage1.cpio.zst")
+  def stage1!(:prod), do: served!("stage1.cpio.zst")
   def stage1!(:dev), do: image!("stage1-dev.cpio.zst")
+
+  defp served!(name), do: Path.join(served_dir!(), name)
 
   defp image!(name) do
     path = Path.join(system_images!(), name)
@@ -88,10 +89,4 @@ defmodule Kubex.E2E.Artifacts do
   end
 
   defp root(), do: Mix.Project.build_path() |> Path.dirname() |> Path.dirname()
-
-  defp dir() do
-    dir = Path.join([root(), "_build", "e2e", "artifacts"])
-    File.mkdir_p!(dir)
-    dir
-  end
 end

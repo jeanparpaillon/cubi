@@ -3,7 +3,7 @@
 Runs BEAM releases on a cluster without Kubernetes: nodes network-boot into BEAM,
 join with a token, and keep membership in Khepri on ZFS.
 
-**Status: phase 2.** Code so far: the test harness, the firmware app and the forked Nerves system.
+**Status: phase 3 done.** Code so far: the test harness, the firmware app and the forked Nerves system.
 
 An umbrella project: `config/`, `deps/`, `_build/` and `mix.lock` are shared at
 the root, and the apps live in `apps/`.
@@ -12,7 +12,8 @@ the root, and the apps live in `apps/`.
 | --- | --- |
 | `apps/kubex_fw` | The Nerves firmware app, on `kubex_system_x86_64`. Run `MIX_TARGET=x86_64 mix firmware` from this directory; the first build compiles the system (Buildroot, about an hour), cached in `~/.nerves/artifacts` afterwards. `MIX_ENV=e2e` trusts only the harness key |
 | `apps/kubex_system_x86_64` | The Nerves system, a **git submodule**: branch `kubex` = upstream `nerves_system_x86_64` v1.34.0 plus the kubex delta (kernel options, `package/kubex-zfs`, the stage-1 initramfs in `stage1/` + `package/kubex-stage1`). Remote `upstream` is the vanilla repo; no `origin` yet. Commit inside it, then stage the gitlink here. See its README |
-| `apps/kubex_e2e` | The host-only QEMU harness ([docs/testing.md](docs/testing.md) §2). Never a firmware dependency, and it has no `:nerves` dependency, so the shared config skips `nerves_bootstrap` for it. `mix test` runs unit tests; `mix test --only e2e:tier1` boots VMs on the system's kernel and stage-1 (build the e2e firmware first; `KUBEX_E2E_KERNEL` overrides the kernel) |
+| `apps/kubex_ipxe` | `mix firmware.ipxe` ([docs/specs.md](docs/specs.md) §2.3): runs `mix firmware`, then writes the served directory `_build/<target>_<env>/ipxe/`. A build-time dependency of `kubex_fw`, never in a release |
+| `apps/kubex_e2e` | The host-only QEMU harness ([docs/testing.md](docs/testing.md) §2). Never a firmware dependency, and it has no `:nerves` dependency, so the shared config skips `nerves_bootstrap` for it. `mix test` runs unit tests; `mix test --only e2e:tier1` boots VMs from the served directory (run `MIX_TARGET=x86_64 MIX_ENV=e2e mix firmware.ipxe` in `apps/kubex_fw` first; `KUBEX_E2E_KERNEL` overrides the kernel) |
 
 Run `mix kubex.e2e.key` in `apps/kubex_e2e` before building e2e firmware. The
 key is gitignored. Building the firmware needs the `nerves_bootstrap` archive,

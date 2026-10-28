@@ -23,8 +23,10 @@ umbrella), meant as releases to deploy onto a node ([docs/specs.md](docs/specs.m
 
 Run `mix kubex.e2e.key` in `apps/kubex_e2e` before building e2e firmware (it
 creates the harness ssh key and the test CA that signs e2e images), and
-`mix kubex.e2e.ipxe` once before the UEFI network-boot tests (it fetches
-Ubuntu's `ipxe.efi`; `KUBEX_E2E_IPXE_EFI` overrides). Both are gitignored. Building the firmware needs the `nerves_bootstrap` archive,
+`mix kubex.e2e.ipxe` once before the network-boot tests (it fetches
+Ubuntu's `ipxe.efi`, `KUBEX_E2E_IPXE_EFI` overrides; and builds kubex's own
+iPXE trusting the test CA into `priv/ipxe/trusted/`, with `mix kubex.ipxe`,
+`KUBEX_E2E_IPXE_TRUSTED` overrides). Both are gitignored. Building the firmware needs the `nerves_bootstrap` archive,
 and host builds of `kubex_fw` (a root `mix test`, for example) need
 `libmnl-dev` for `nerves_uevent`. Build the system with
 `BR2_PRIMARY_SITE=https://sources.buildroot.net` in the environment: some

@@ -27,6 +27,7 @@ defmodule Kubex.E2E.VM do
             memory: 1024,
             disks: [],
             rtc: :host,
+            ipxe: :stock,
             boot: nil
 
   @typedoc """
@@ -35,6 +36,10 @@ defmodule Kubex.E2E.VM do
   directory `mix firmware.ipxe` writes (docs/phase4.md): BIOS through QEMU's
   iPXE NIC ROM, UEFI through OVMF's PXE, `ipxe.efi` and an `autoexec.ipxe`
   from a per-VM TFTP root. With `:http`, only that chainload step is TFTP.
+
+  `ipxe: :trusted` swaps in kubex's own iPXE, which trusts only the test CA and
+  has `imgverify` (`Kubex.E2E.Ipxe.trusted_dir/0`, docs/specs.md §2.11.2):
+  as the NIC's option ROM for BIOS, as the chainloaded `ipxe.efi` for UEFI.
   """
   @type boot ::
           {:direct, Path.t(), [Kubex.E2E.Initrd.part()], String.t()}
@@ -47,6 +52,7 @@ defmodule Kubex.E2E.VM do
           memory: pos_integer(),
           disks: [Kubex.E2E.Disk.t()],
           rtc: :host | {:skew, DateTime.t()},
+          ipxe: :stock | :trusted,
           boot: boot()
         }
 
@@ -147,6 +153,11 @@ defmodule Kubex.E2E.VM do
 
     device =
       if match?({:pxe, _, _}, spec.boot), do: device <> ",bootindex=0", else: device
+
+    device =
+      if spec.firmware == :bios and spec.ipxe == :trusted,
+        do: device <> ",romfile=#{Kubex.E2E.Ipxe.trusted_path("1af41000.rom")}",
+        else: device
 
     [["-netdev", netdev], ["-device", device]]
   end
@@ -315,11 +326,17 @@ defmodule Kubex.E2E.VM do
 
   # The UEFI TFTP root: ipxe.efi, an autoexec.ipxe that chains boot.ipxe, and
   # for :tftp the served files themselves (symlinked).
-  defp prepare_pxe(%{firmware: :uefi, boot: {:pxe, protocol, served}}, paths) do
+  defp prepare_pxe(%{firmware: :uefi, boot: {:pxe, protocol, served}} = spec, paths) do
     root = pxe_root(paths)
     File.rm_rf!(root)
     File.mkdir_p!(root)
-    File.cp!(Kubex.E2E.Ipxe.efi!(), Path.join(root, "ipxe.efi"))
+
+    efi =
+      if spec.ipxe == :trusted,
+        do: Kubex.E2E.Ipxe.trusted!("ipxe.efi"),
+        else: Kubex.E2E.Ipxe.efi!()
+
+    File.cp!(efi, Path.join(root, "ipxe.efi"))
 
     chain =
       case protocol do
@@ -336,6 +353,9 @@ defmodule Kubex.E2E.VM do
     # autoexec.ipxe runs before iPXE's own DHCP.
     File.write!(Path.join(root, "autoexec.ipxe"), "#!ipxe\ndhcp\nchain #{chain}\n")
   end
+
+  defp prepare_pxe(%{firmware: :bios, ipxe: :trusted}, _paths),
+    do: Kubex.E2E.Ipxe.trusted!("1af41000.rom")
 
   defp prepare_pxe(_spec, _paths), do: :ok
 

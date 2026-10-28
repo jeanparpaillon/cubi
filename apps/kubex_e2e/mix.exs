@@ -30,6 +30,8 @@ defmodule Kubex.E2E.MixProject do
       {:muontrap, "~> 2.0"},
       # The test CA, and checking signed images (docs/specs.md §2.11).
       {:kubex_pki, in_umbrella: true},
+      # kubex's own iPXE, built with the test CA (`mix kubex.e2e.ipxe`).
+      {:kubex_tools, in_umbrella: true},
       # The HTTP side of PXE boots (docs/testing.md §4.1).
       {:bandit, "~> 1.6"},
       {:plug, "~> 1.16"}

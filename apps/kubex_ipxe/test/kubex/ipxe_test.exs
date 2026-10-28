@@ -65,6 +65,28 @@ defmodule Kubex.IpxeTest do
     assert script =~ "648f236c-1b51-5f00-76b4-a24e4c12521b"
   end
 
+  test "imgverify: true checks each image against its .sig right after loading it" do
+    script =
+      @fwup_output
+      |> Kubex.Ipxe.parse_metadata()
+      |> Kubex.Ipxe.boot_script("console=ttyS0", imgverify: true)
+
+    assert script =~ """
+           kernel vmlinuz console=ttyS0
+           imgverify vmlinuz vmlinuz.sig
+           initrd stage1.cpio.zst
+           imgverify stage1.cpio.zst stage1.cpio.zst.sig
+           initrd rootfs.squashfs /rootfs.squashfs
+           imgverify rootfs.squashfs rootfs.squashfs.sig
+           boot
+           """
+  end
+
+  test "without imgverify, the script has no imgverify line" do
+    script = @fwup_output |> Kubex.Ipxe.parse_metadata() |> Kubex.Ipxe.boot_script("x")
+    refute script =~ "imgverify"
+  end
+
   test "modes are read from ls-style permissions, setuid, setgid and sticky included" do
     assert Kubex.Ipxe.mode("-rwxr-xr-x") == 0o755
     assert Kubex.Ipxe.mode("-rwsr-xr-x") == 0o4755

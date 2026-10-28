@@ -897,6 +897,14 @@ what the old one signed; rotating the root does, at the cost of new images.
 
   A failed `imgverify` stops the script before `boot`. A production boot
   server renders its own per-node scripts (§2.7) with the same lines.
+- **`mix kubex.ipxe`** (in `apps/kubex_tools`) builds that iPXE: the v2.0.0
+  release tarball, pinned by SHA-512 and cached in `~/.cache/kubex/`, built
+  with `TRUST=<ca.pem>` and `IMAGE_TRUST_CMD`, into `undionly.kpxe` (BIOS
+  chainload), `ipxe.efi` (UEFI chainload) and `1af41000.rom` (QEMU's
+  virtio-net option ROM, for the harness). iPXE 2.0.0 verifies RSA and ECDSA
+  (P-256, P-384) and requires `codeSigning` on the signer. `TRUST=` is its
+  only root for HTTPS too, so an HTTPS boot server ([phase 5](phase5.md))
+  needs a certificate from the same root, or a second `TRUST=` entry.
 - e2e images are signed with a test CA that `mix kubex.e2e.key` creates next to
   the harness key, in `apps/kubex_e2e/priv/pki/` ([testing.md](testing.md)).
 

@@ -5,12 +5,16 @@ defmodule Mix.Tasks.Firmware.Ipxe do
   `rootfs.squashfs`, `boot.ipxe`, `base.json` and `SHA256SUMS` into
   `_build/<target>_<env>/ipxe/` (docs/specs.md §2.3, §2.11.2, `Kubex.Ipxe`).
 
-      MIX_TARGET=x86_64 mix firmware.ipxe [--cmdline "console=ttyS0 …"] [--signer DIR]
+      MIX_TARGET=x86_64 mix firmware.ipxe [--cmdline "console=ttyS0 …"] [--signer DIR] [--imgverify]
 
     * `--signer DIR` - a PKI directory (`mix kubex.gen_ca`): its signer
       writes `vmlinuz.sig`, `stage1.cpio.zst.sig` and `rootfs.squashfs.sig`.
       Defaults to `config :kubex_fw, :signer`. Required unless `MIX_ENV=dev`,
       which builds an unsigned directory with a warning.
+    * `--imgverify` - write `imgverify` lines into `boot.ipxe`, so iPXE
+      refuses an image whose signature does not verify. Needs a signer, and an
+      iPXE that trusts its root (`mix kubex.ipxe`): a stock iPXE refuses every
+      image.
 
   The root certificate the node trusts for releases, `/etc/kubex/ca.pem` in
   the served rootfs, is `config :kubex_fw, :ca_cert`, else the signer's
@@ -23,7 +27,7 @@ defmodule Mix.Tasks.Firmware.Ipxe do
   """
   use Mix.Task
 
-  @switches [cmdline: :string, signer: :string]
+  @switches [cmdline: :string, signer: :string, imgverify: :boolean]
 
   @impl Mix.Task
   def run(args) do
@@ -31,6 +35,9 @@ defmodule Mix.Tasks.Firmware.Ipxe do
 
     signer = signer(opts[:signer] || Application.get_env(:kubex_fw, :signer))
     ca_cert = trusted_ca(Application.get_env(:kubex_fw, :ca_cert), signer)
+
+    if opts[:imgverify] && signer == nil,
+      do: Mix.raise("--imgverify needs a signer: the script would refuse every image")
 
     Mix.Task.run("firmware", [])
 
@@ -45,7 +52,8 @@ defmodule Mix.Tasks.Firmware.Ipxe do
         cmdline: Keyword.get(opts, :cmdline, "console=ttyS0"),
         otp_version: otp_version!(system),
         ca_cert: ca_cert,
-        signer: signer
+        signer: signer,
+        imgverify: opts[:imgverify] || false
       )
 
     Mix.shell().info("""

@@ -61,6 +61,8 @@ defmodule Kubex.Ipxe do
     * `:otp_version` (required) - the system's full OTP version, for `base.json`
     * `:ca_cert` - root certificate to install as `/etc/kubex/ca.pem`
     * `:signer` - PKI directory (`Kubex.Pki`) whose signer signs the images
+    * `:imgverify` - write the `imgverify` lines into `boot.ipxe` (§2.11.2);
+      needs `:signer`
 
   Returns the metadata read from the `.fw`.
   """
@@ -73,6 +75,9 @@ defmodule Kubex.Ipxe do
     otp_version = Keyword.fetch!(opts, :otp_version)
     ca_cert = Keyword.get(opts, :ca_cert)
     signer = Keyword.get(opts, :signer)
+    imgverify = Keyword.get(opts, :imgverify, false)
+
+    if imgverify and signer == nil, do: raise(ArgumentError, ":imgverify needs a :signer")
 
     for path <- [fw, stage1 | List.wrap(ca_cert)], not File.exists?(path), do: raise("no #{path}")
 
@@ -95,7 +100,7 @@ defmodule Kubex.Ipxe do
     repack_rootfs!(original, root, Path.join(output, "rootfs.squashfs"), added, work)
 
     File.cp!(stage1, Path.join(output, "stage1.cpio.zst"))
-    File.write!(Path.join(output, "boot.ipxe"), boot_script(meta, cmdline))
+    File.write!(Path.join(output, "boot.ipxe"), boot_script(meta, cmdline, imgverify: imgverify))
     File.write!(Path.join(output, "base.json"), [:json.format(base), "\n"])
     File.rm_rf!(work)
 
@@ -214,18 +219,27 @@ defmodule Kubex.Ipxe do
     end
   end
 
-  @doc "The generic `boot.ipxe`: kernel, stage-1 and the rootfs as a named initrd (§2.2)."
-  @spec boot_script(metadata(), String.t()) :: String.t()
-  def boot_script(meta, cmdline) do
+  @doc """
+  The generic `boot.ipxe`: kernel, stage-1 and the rootfs as a named initrd
+  (§2.2). With `imgverify: true`, each image is followed by its `imgverify`
+  against `<image>.sig` (§2.11.2): a failure stops the script before `boot`.
+  Only an iPXE built to trust the signer's root (`mix kubex.ipxe`) runs it.
+  """
+  @spec boot_script(metadata(), String.t(), keyword()) :: String.t()
+  def boot_script(meta, cmdline, opts \\ []) do
+    verify = fn image ->
+      if opts[:imgverify], do: "imgverify #{image} #{image}.sig\n", else: ""
+    end
+
     """
     #!ipxe
     # #{meta["product"]} #{meta["version"]} (#{meta["uuid"]}), from `mix firmware.ipxe`.
     # URLs are relative to this script. A boot server renders a per-node script
     # instead, with kubex.join= and the token (docs/specs.md §2.7).
     kernel vmlinuz #{cmdline}
-    initrd stage1.cpio.zst
-    initrd rootfs.squashfs /rootfs.squashfs
-    boot
+    #{verify.("vmlinuz")}initrd stage1.cpio.zst
+    #{verify.("stage1.cpio.zst")}initrd rootfs.squashfs /rootfs.squashfs
+    #{verify.("rootfs.squashfs")}boot
     """
   end
 

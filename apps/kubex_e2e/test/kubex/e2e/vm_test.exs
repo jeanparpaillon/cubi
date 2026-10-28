@@ -148,6 +148,23 @@ defmodule Kubex.E2E.VMTest do
       end
     end
 
+    test "trusted iPXE, BIOS: kubex's build replaces the NIC's option ROM" do
+      argv =
+        VM.argv(VM.normalize(spec(ipxe: :trusted, boot: {:pxe, :tftp, "/srv/ipxe"})), @pxe_paths)
+
+      assert nic(argv) =~
+               ",romfile=#{Kubex.E2E.Ipxe.trusted_path("1af41000.rom")}"
+    end
+
+    test "stock iPXE, or UEFI: the NIC keeps QEMU's option ROM" do
+      for spec <- [
+            spec(boot: {:pxe, :tftp, "/srv/ipxe"}),
+            spec(firmware: :uefi, ipxe: :trusted, boot: {:pxe, :tftp, "/srv/ipxe"})
+          ] do
+        refute VM.argv(VM.normalize(spec), @pxe_paths) |> nic() =~ "romfile"
+      end
+    end
+
     test "direct boot puts no boot options on the NIC" do
       argv = VM.argv(VM.normalize(spec()), @paths)
 

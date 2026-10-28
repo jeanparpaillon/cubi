@@ -2,7 +2,7 @@
 
 Part of the kubex node boot plan: design in [specs.md](specs.md), open questions in [questions.md](questions.md), tests in [testing.md](testing.md).
 
-- [ ] Custom iPXE build with HTTPS, embedded CA and `imgverify`.
+- [ ] Custom iPXE build with HTTPS, embedded CA and `imgverify`. The embedded CA and `imgverify` are done in [milestone 1](milestone1.md) (`mix kubex.ipxe`); HTTPS remains, with the boot server's certificate under the same root ([§2.11.2](specs.md)).
 - [ ] Per-node scripts selected by `${uuid}`.
 - [ ] dnsmasq proxy-DHCP config.
 - [ ] Stage-1 as a small static C program, and no busybox in the initramfs ([security.md](security.md) §5).

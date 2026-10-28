@@ -51,7 +51,8 @@ trusted root is `/etc/cubi/ca.pem` or the archive's `ca.pem` pinned by
 - [ ] `mix firmware.ipxe --public`: no CA, no authorized keys, refuses if either is configured; still writes `base.json` and `SHA256SUMS`, and the `.sig` files when given the project's signer.
 - [ ] `mix cubi.release --base <url>`: fetches `base.json` over HTTPS, checked against `SHA256SUMS`.
 - [ ] `Cubi.Tools.BootScript` and `mix cubi.boot_script`: the pins, the 2048-byte limit, `--no-ssh`.
-- [ ] `Cubi.Provider` behaviour, `Instance`, provider config and `{:env, var}` resolution; a shared conformance suite (`Cubi.Provider.Case`) that every provider module runs.
+- [x] `Cubi.Provider` behaviour, `Instance`, provider config and `{:env, var}` resolution; a shared conformance suite (`Cubi.Provider.Case`) that every provider module runs.
+      `Cubi.Provider` (`config/1` finds a provider by atom or `--provider` string without creating atoms, `init/1` resolves top-level `{:env, var}` options, an unset or empty variable failing before the module's `init/1`) and `Cubi.Provider.Instance` (`status` is `:pending`, `:running`, `:stopped` or `:unknown`) in `apps/cubi_tools/lib`. `Cubi.Provider.Case` is in `apps/cubi_tools/test/support`: `use Cubi.Provider.Case, provider: M`, options from the context's `:provider_opts`, and every instance a test created destroyed in `on_exit`, which fails loudly. It runs against `Cubi.Provider.Fake`, which keeps one file per instance and is meant for the task tests too.
 - [ ] `Cubi.Provider.Qemu`: VMs as background QEMU processes, BIOS and UEFI, booted from a local HTTP server serving a public directory and the per-instance script.
 - [ ] `mix cubi.provision`, `mix cubi.instances`, `mix cubi.upgrade`, `mix cubi.destroy`; `mix cubi.deploy --provider`.
 - [ ] `Cubi.Provider.Vultr` over its REST API (`Req`), the conformance suite against a stubbed API (`Req.Test`), and one manual run on a real account.

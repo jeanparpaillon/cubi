@@ -16,6 +16,26 @@ defmodule Kubex.E2E.Key do
   @spec public_key_path() :: Path.t()
   def public_key_path(), do: Path.join(@dir, "id_ed25519.pub")
 
+  @pki Path.expand("../../../priv/pki", __DIR__)
+
+  @doc """
+  The test CA's PKI directory (`Kubex.Pki`): `MIX_ENV=e2e` firmware is signed
+  by its signer and trusts its root for releases (docs/specs.md §2.11.2).
+  """
+  @spec pki_dir() :: Path.t()
+  def pki_dir(), do: @pki
+
+  @doc "Creates the test CA if it does not exist yet. Returns `:created` or `:exists`."
+  @spec ensure_pki!() :: :created | :exists
+  def ensure_pki!() do
+    if File.exists?(Kubex.Pki.paths(@pki).signer_key) do
+      :exists
+    else
+      Kubex.Pki.gen_ca!(@pki, name: "kubex e2e")
+      :created
+    end
+  end
+
   @doc "Creates the key pair if it does not exist yet. Returns `:created` or `:exists`."
   @spec ensure!() :: :created | :exists
   def ensure!() do

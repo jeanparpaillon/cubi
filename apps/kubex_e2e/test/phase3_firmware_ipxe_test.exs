@@ -14,7 +14,8 @@ defmodule Kubex.E2E.Phase3FirmwareIpxeTest do
   @moduletag e2e: :tier1
   @moduletag timeout: 300_000
 
-  @files ~w(boot.ipxe rootfs.squashfs stage1.cpio.zst vmlinuz)
+  @images ~w(rootfs.squashfs stage1.cpio.zst vmlinuz)
+  @files ~w(boot.ipxe base.json) ++ @images ++ Enum.map(@images, &(&1 <> ".sig"))
 
   setup_all do
     dir = Artifacts.served_dir!()
@@ -25,7 +26,7 @@ defmodule Kubex.E2E.Phase3FirmwareIpxeTest do
     {:ok, served: dir, fw_uuid: uuid, fw_version: version}
   end
 
-  test "the directory holds the four files, and SHA256SUMS matches them", %{served: dir} do
+  test "the directory holds the served files, and SHA256SUMS matches them", %{served: dir} do
     assert Enum.sort(File.ls!(dir)) == Enum.sort(["SHA256SUMS" | @files])
 
     sums =
@@ -49,6 +50,41 @@ defmodule Kubex.E2E.Phase3FirmwareIpxeTest do
     refute listing =~ ~r{squashfs-root/boot(/|$)}m
     assert listing =~ ~r{^-rw-r--r-- 0/0 .* squashfs-root/etc/firmware\.kv$}m
     assert listing =~ ~r{^-rwsr-xr-x 0/0 .* squashfs-root/bin/busybox$}m
+  end
+
+  test "the images are signed by the test CA's signer, and nobody else's", %{served: dir} do
+    ca = Kubex.Pki.paths(Kubex.E2E.Key.pki_dir()).ca_cert
+    other = Path.join(System.tmp_dir!(), "kubex_p3_other_#{System.unique_integer([:positive])}")
+    on_exit(fn -> File.rm_rf!(other) end)
+    Kubex.Pki.gen_ca!(other)
+
+    for image <- @images do
+      path = Path.join(dir, image)
+      assert Kubex.Pki.Cms.verify(path, path <> ".sig", ca) == :ok, image
+
+      assert {:error, _} =
+               Kubex.Pki.Cms.verify(path, path <> ".sig", Kubex.Pki.paths(other).ca_cert)
+    end
+  end
+
+  test "the served rootfs trusts the test CA for releases (docs/specs.md §2.11.2)", %{served: dir} do
+    rootfs = Path.join(dir, "rootfs.squashfs")
+    {listing, 0} = System.cmd("unsquashfs", ["-n", "-lln", rootfs])
+    {ca, 0} = System.cmd("unsquashfs", ["-cat", rootfs, "etc/kubex/ca.pem"])
+
+    assert listing =~ ~r{^-rw-r--r-- 0/0 .* squashfs-root/etc/kubex/ca\.pem$}m
+    assert ca == File.read!(Kubex.Pki.paths(Kubex.E2E.Key.pki_dir()).ca_cert)
+  end
+
+  test "base.json describes the image's OTP and applications", %{served: dir} = context do
+    base = dir |> Path.join("base.json") |> File.read!() |> JSON.decode!()
+
+    assert base["otp_release"] == "29"
+    assert base["firmware"]["uuid"] == context.fw_uuid
+    assert base["release"]["name"] == "kubex_fw"
+
+    assert %{"kernel" => _, "elixir" => _, "shoehorn" => _, "kubex_fw" => _} =
+             base["applications"]
   end
 
   test "boot.ipxe loads what is served, by relative URL", %{served: dir} do

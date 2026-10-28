@@ -9,7 +9,9 @@ defmodule Kubex.Ipxe do
   | `stage1.cpio.zst` | the system artifact's `images/` |
   | `rootfs.squashfs` | `data/rootfs.img`, rebuilt without `/boot` and with `/etc/firmware.kv` (below) |
   | `boot.ipxe` | rendered here; relative URLs, so the directory can be served from anywhere |
-  | `SHA256SUMS` | the four files above |
+  | `base.json` | what the image ships, for `mix kubex.release --base` (below) |
+  | `*.sig` | with a signer: detached CMS signatures of `vmlinuz`, `stage1.cpio.zst` and `rootfs.squashfs` (§2.11.2) |
+  | `SHA256SUMS` | every file above |
 
   **The served rootfs** is the `.fw`'s, rebuilt with two changes:
 
@@ -23,6 +25,13 @@ defmodule Kubex.Ipxe do
       built, after its squashfs is sealed. So it goes into the served squashfs,
       one `key=value` per line, and the firmware's `config/runtime.exs` loads it
       into `Nerves.Runtime.KVBackend.InMemory`.
+    * **the root CA in `/etc/kubex/ca.pem`**, when there is one: the
+      certificate the node checks deployed releases against (§2.11.2). The
+      rootfs signature then covers it.
+
+  **`base.json`** describes the image to the tools that build releases for it
+  (§2.11.3): the OTP and ERTS versions, and every application in the rootfs's
+  `/srv/erlang/lib` with its version.
 
   The rebuild needs no root, the way Nerves' own `merge-squashfs` works:
   unpack, then repack with a pseudo file that restores every entry's mode and
@@ -31,6 +40,8 @@ defmodule Kubex.Ipxe do
   """
 
   @kv_path "etc/firmware.kv"
+  @ca_path "etc/kubex/ca.pem"
+  @images ~w(vmlinuz stage1.cpio.zst rootfs.squashfs)
 
   # rel2fw.sh's built-in priorities: the files read first at boot.
   @sort_priorities "sbin/init 32764\netc/erlinit.config 32763\n"
@@ -47,6 +58,9 @@ defmodule Kubex.Ipxe do
     * `:stage1` (required) - `stage1.cpio.zst` from the system artifact
     * `:output` (required) - the directory, wiped first
     * `:cmdline` - kernel arguments in `boot.ipxe`, default `"console=ttyS0"`
+    * `:otp_version` (required) - the system's full OTP version, for `base.json`
+    * `:ca_cert` - root certificate to install as `/etc/kubex/ca.pem`
+    * `:signer` - PKI directory (`Kubex.Pki`) whose signer signs the images
 
   Returns the metadata read from the `.fw`.
   """
@@ -56,8 +70,11 @@ defmodule Kubex.Ipxe do
     stage1 = Keyword.fetch!(opts, :stage1)
     output = Keyword.fetch!(opts, :output)
     cmdline = Keyword.get(opts, :cmdline, "console=ttyS0")
+    otp_version = Keyword.fetch!(opts, :otp_version)
+    ca_cert = Keyword.get(opts, :ca_cert)
+    signer = Keyword.get(opts, :signer)
 
-    for path <- [fw, stage1], not File.exists?(path), do: raise("no #{path}")
+    for path <- [fw, stage1 | List.wrap(ca_cert)], not File.exists?(path), do: raise("no #{path}")
 
     meta = metadata!(fw)
 
@@ -72,21 +89,82 @@ defmodule Kubex.Ipxe do
     {kernel, 0} = cmd!("unsquashfs", ["-cat", original, "boot/bzImage"])
     File.write!(Path.join(output, "vmlinuz"), kernel)
 
-    rebuild_rootfs!(original, Path.join(output, "rootfs.squashfs"), kv(meta), work)
+    root = unpack_rootfs!(original, work)
+    base = base(root, otp_version, meta)
+    added = add_files!(root, kv(meta), ca_cert)
+    repack_rootfs!(original, root, Path.join(output, "rootfs.squashfs"), added, work)
 
     File.cp!(stage1, Path.join(output, "stage1.cpio.zst"))
     File.write!(Path.join(output, "boot.ipxe"), boot_script(meta, cmdline))
+    File.write!(Path.join(output, "base.json"), [:json.format(base), "\n"])
     File.rm_rf!(work)
+
+    if signer, do: Kubex.Pki.Cms.sign!(Enum.map(@images, &Path.join(output, &1)), signer)
 
     File.write!(
       Path.join(output, "SHA256SUMS"),
-      for name <- ~w(boot.ipxe rootfs.squashfs stage1.cpio.zst vmlinuz) do
+      for name <- output |> File.ls!() |> Enum.sort(), name != "SHA256SUMS" do
         sum = :crypto.hash(:sha256, File.read!(Path.join(output, name)))
         [Base.encode16(sum, case: :lower), "  ", name, "\n"]
       end
     )
 
     meta
+  end
+
+  @doc """
+  The root certificate a build installs as `/etc/kubex/ca.pem` (§2.11.2):
+  `ca_cert` if given, else the signer's own `ca.pem`, else `nil`. With both,
+  they must be the same certificate: an image signed by one root that trusts
+  another for releases is a mistake.
+  """
+  @spec trusted_ca!(Path.t() | nil, Path.t() | nil) :: Path.t() | nil
+  def trusted_ca!(ca_cert, nil), do: ca_cert
+
+  def trusted_ca!(ca_cert, signer) do
+    signer_ca = Kubex.Pki.paths(signer).ca_cert
+
+    cond do
+      ca_cert == nil ->
+        signer_ca
+
+      der(ca_cert) == der(signer_ca) ->
+        ca_cert
+
+      true ->
+        raise "#{ca_cert} is not the root that issued the signer in #{signer} " <>
+                "(#{signer_ca}): the image would not trust its own signer"
+    end
+  end
+
+  defp der(path),
+    do: path |> File.read!() |> X509.Certificate.from_pem!() |> X509.Certificate.to_der()
+
+  @doc """
+  `base.json` for an unpacked rootfs at `root` (§2.11.3).
+  """
+  @spec base(Path.t(), String.t(), metadata()) :: map()
+  def base(root, otp_version, meta) do
+    erlang = Path.join(root, "srv/erlang")
+
+    [erts_version, release_version] =
+      erlang |> Path.join("releases/start_erl.data") |> File.read!() |> String.split()
+
+    applications =
+      for dir <- erlang |> Path.join("lib") |> File.ls!(),
+          [_, name, vsn] <- [Regex.run(~r/^(.+)-([^-]+)$/, dir)],
+          into: %{},
+          do: {name, vsn}
+
+    %{
+      "format" => 1,
+      "otp_release" => otp_version |> String.split(".") |> hd(),
+      "otp_version" => otp_version,
+      "erts_version" => erts_version,
+      "release" => %{"name" => meta["product"], "version" => release_version},
+      "firmware" => Map.take(meta, ["product", "version", "uuid"]),
+      "applications" => applications
+    }
   end
 
   @doc "The `.fw`'s metadata, as `fwup -m` reports it, without the `meta-` prefix."
@@ -151,19 +229,38 @@ defmodule Kubex.Ipxe do
     """
   end
 
-  defp rebuild_rootfs!(input, output, kv, work) do
+  defp unpack_rootfs!(input, work) do
     root = Path.join(work, "root")
     {_, 0} = cmd!("unsquashfs", ["-n", "-f", "-d", root, input])
     File.rm_rf!(Path.join(root, "boot"))
+    root
+  end
+
+  # Writes the files the served rootfs gains, and returns their pseudo
+  # definitions: all root-owned.
+  defp add_files!(root, kv, ca_cert) do
     File.write!(Path.join(root, @kv_path), encode_kv(kv))
 
+    ca =
+      if ca_cert do
+        File.mkdir_p!(Path.join(root, Path.dirname(@ca_path)))
+        File.cp!(ca_cert, Path.join(root, @ca_path))
+        ["/#{Path.dirname(@ca_path)} m 755 0 0", "/#{@ca_path} m 644 0 0"]
+      else
+        []
+      end
+
+    ["/#{@kv_path} m 644 0 0" | ca]
+  end
+
+  defp repack_rootfs!(input, root, output, added, work) do
     {listing, 0} = cmd!("unsquashfs", ["-n", "-lln", input])
 
     pseudo =
       listing
       |> pseudo_definitions()
       |> Enum.reject(&(String.starts_with?(&1, "/boot ") or String.starts_with?(&1, "/boot/")))
-      |> Kernel.++(["/#{@kv_path} m 644 0 0"])
+      |> Kernel.++(added)
 
     pseudo_file = Path.join(work, "pseudo")
     File.write!(pseudo_file, Enum.map(pseudo, &[&1, "\n"]))

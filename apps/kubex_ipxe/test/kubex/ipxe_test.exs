@@ -1,6 +1,15 @@
 defmodule Kubex.IpxeTest do
   use ExUnit.Case, async: true
 
+  # Two roots, for trusted_ca!/2: generated once, RSA-3072 takes a while.
+  setup_all do
+    base = Path.join(System.tmp_dir!(), "kubex_ipxe_test_#{System.unique_integer([:positive])}")
+    on_exit(fn -> File.rm_rf!(base) end)
+
+    for name <- ~w(pki other), do: Kubex.Pki.gen_ca!(Path.join(base, name))
+    %{pki: Path.join(base, "pki"), other: Path.join(base, "other")}
+  end
+
   @fwup_output """
   meta-product=kubex_fw
   meta-version=0.1.0
@@ -80,5 +89,67 @@ defmodule Kubex.IpxeTest do
              "/var/www m 755 33 33",
              "/etc/a\\ file m 644 0 0"
            ]
+  end
+
+  describe "base/3" do
+    @describetag :tmp_dir
+
+    test "reads ERTS and every application from the rootfs, OTP from the system", %{tmp_dir: root} do
+      erlang = Path.join(root, "srv/erlang")
+      File.mkdir_p!(Path.join(erlang, "releases"))
+      File.write!(Path.join(erlang, "releases/start_erl.data"), "17.0.2 0.1.0\n")
+
+      for dir <- ~w(kernel-11.0.2 nerves_runtime-0.13.13 elixir-1.20.2),
+          do: File.mkdir_p!(Path.join([erlang, "lib", dir]))
+
+      meta = Kubex.Ipxe.parse_metadata(@fwup_output)
+
+      assert Kubex.Ipxe.base(root, "29.0.2", meta) == %{
+               "format" => 1,
+               "otp_release" => "29",
+               "otp_version" => "29.0.2",
+               "erts_version" => "17.0.2",
+               "release" => %{"name" => "kubex_fw", "version" => "0.1.0"},
+               "firmware" => %{
+                 "product" => "kubex_fw",
+                 "version" => "0.1.0",
+                 "uuid" => "648f236c-1b51-5f00-76b4-a24e4c12521b"
+               },
+               "applications" => %{
+                 "kernel" => "11.0.2",
+                 "nerves_runtime" => "0.13.13",
+                 "elixir" => "1.20.2"
+               }
+             }
+    end
+  end
+
+  describe "trusted_ca!/2" do
+    test "no CA and no signer: nothing trusted" do
+      assert Kubex.Ipxe.trusted_ca!(nil, nil) == nil
+    end
+
+    test "a CA alone is trusted as is, signed or not", %{other: other} do
+      ca = Kubex.Pki.paths(other).ca_cert
+      assert Kubex.Ipxe.trusted_ca!(ca, nil) == ca
+    end
+
+    test "a signer alone brings its own root", %{pki: pki} do
+      assert Kubex.Ipxe.trusted_ca!(nil, pki) == Kubex.Pki.paths(pki).ca_cert
+    end
+
+    @tag :tmp_dir
+    test "a copy of the signer's root is accepted", %{pki: pki, tmp_dir: tmp} do
+      copy = Path.join(tmp, "ca.pem")
+      File.cp!(Kubex.Pki.paths(pki).ca_cert, copy)
+
+      assert Kubex.Ipxe.trusted_ca!(copy, pki) == copy
+    end
+
+    test "another root than the signer's is refused", %{pki: pki, other: other} do
+      assert_raise RuntimeError, ~r/not the root that issued the signer/, fn ->
+        Kubex.Ipxe.trusted_ca!(Kubex.Pki.paths(other).ca_cert, pki)
+      end
+    end
   end
 end

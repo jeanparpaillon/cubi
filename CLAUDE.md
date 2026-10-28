@@ -21,7 +21,8 @@ the root, and the apps live in `apps/`.
 umbrella), meant as releases to deploy onto a node ([docs/specs.md](docs/specs.md)
 §2.11): `examples/kubex_hello` is a one-page Bandit app that prints its version.
 
-Run `mix kubex.e2e.key` in `apps/kubex_e2e` before building e2e firmware, and
+Run `mix kubex.e2e.key` in `apps/kubex_e2e` before building e2e firmware (it
+creates the harness ssh key and the test CA that signs e2e images), and
 `mix kubex.e2e.ipxe` once before the UEFI network-boot tests (it fetches
 Ubuntu's `ipxe.efi`; `KUBEX_E2E_IPXE_EFI` overrides). Both are gitignored. Building the firmware needs the `nerves_bootstrap` archive,
 and host builds of `kubex_fw` (a root `mix test`, for example) need

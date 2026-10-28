@@ -33,7 +33,8 @@ ssh (§2.11.5), loading on the node (§2.11.6) and rollback through shoehorn
       `Kubex.Pki` (`gen_ca!/2`, `gen_signer!/2`, `sign/2`, `verify/5` = [§2.11.4](specs.md) steps 1–2), `Kubex.Pki.Cms` (`sign!/2`, `verify/3`). The archive checks (steps 3–5) belong to the node step.
 - [x] `mix kubex.gen_ca` (in a host-only `apps/kubex_tools`, which user projects add as a `runtime: false` dependency, as `kubex_fw` does with `kubex_ipxe`).
       `--dir`, `--name`, `--signer-only`; prints the root's SHA-256 fingerprint. The default directory is `Kubex.Pki.dir/1`, shared with the tasks to come.
-- [ ] Firmware: `/etc/kubex/ca.pem` copied into the rootfs from the configured CA (`config :kubex_fw, :ca_cert`); `mix firmware.ipxe --signer <dir>` writes the three `.sig` files and `base.json` ([§2.11.2](specs.md), [§2.11.3](specs.md)).
+- [x] Firmware: `/etc/kubex/ca.pem` copied into the rootfs from the configured CA (`config :kubex_fw, :ca_cert`); `mix firmware.ipxe --signer <dir>` writes the three `.sig` files and `base.json` ([§2.11.2](specs.md), [§2.11.3](specs.md)).
+      Added to the served rootfs by `Kubex.Ipxe`, like `/etc/firmware.kv`. `mix kubex.e2e.key` now also creates the test CA (pulled forward from the harness step), and `MIX_ENV=e2e` builds are signed by it; `apps/kubex_e2e/test/phase3_firmware_ipxe_test.exs` checks the signatures, the CA in the rootfs and `base.json`.
 - [ ] Custom iPXE with `TRUST=` the CA and `imgverify` on the three images, and `mix firmware.ipxe --imgverify` rendering `boot.ipxe` with the `imgverify` lines. Pulled forward from [phase 5](phase5.md); the rest of phase 5 (HTTPS, per-node scripts, C stage-1) stays there.
 - [ ] `mix kubex.release`: from a user's Mix project, build the release with the base image's OTP, drop the applications the base image already ships (`--base <ipxe dir>`, from its `base.json`), write the archive with `manifest.json` ([§2.11.3](specs.md)).
 - [ ] `mix kubex.sign <archive>`: add `manifest.sig` and `signer.pem` in place.
@@ -41,7 +42,7 @@ ssh (§2.11.5), loading on the node (§2.11.6) and rollback through shoehorn
 - [ ] `mix kubex.deploy <node>`: stream the archive over ssh (`--port`, `--identity`), print the node's verdict, non-zero exit on refusal or rollback.
 - [ ] `Kubex.Deploy.ShoehornHandler` and the rollback path; `state.json` with `current`, `previous` and `bad` ([§2.11.7](specs.md)).
 - [ ] Boot: after shoehorn's `init` list, `Kubex.Deploy` re-verifies `current`, signer dates excepted, and starts it.
-- [ ] Harness: `mix kubex.e2e.key` also generates a test CA and signer (gitignored); fixtures `hello` v1, v2 (good) and v3 (crashes in `start/2`) and v4 (crashes 5 s after start), built by the tests with `mix kubex.release`.
+- [ ] Harness: ~~`mix kubex.e2e.key` also generates a test CA and signer (gitignored)~~ (done in step 4); fixtures `hello` v1, v2 (good) and v3 (crashes in `start/2`) and v4 (crashes 5 s after start), built by the tests with `mix kubex.release`.
 
 **Acceptance:**
 

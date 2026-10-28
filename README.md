@@ -124,7 +124,8 @@ ecosystem: Helm, operators, managed cloud integrations.
 
 - Elixir 1.20 and the `nerves_bootstrap` archive
   (`mix archive.install hex nerves_bootstrap`);
-- `fwup` and `squashfs-tools` (`unsquashfs`, `mksquashfs`);
+- `fwup` and `squashfs-tools` (`unsquashfs`, `mksquashfs`), and `openssl` to
+  sign images;
 - QEMU for x86_64 with its iPXE NIC ROMs (`qemu-system-x86`, `ipxe-qemu` on
   Debian/Ubuntu), and read-write access to `/dev/kvm`;
 - `libmnl-dev`, only for host builds of `kubex_fw` (a root `mix test`).
@@ -162,16 +163,24 @@ The output lands in `_build/<target>_<env>/ipxe/` at the repository root, so
 | `stage1.cpio.zst` | the stage-1 initramfs, which loop-mounts the rootfs and starts BEAM |
 | `rootfs.squashfs` | Linux userland, ERTS and the release, plus the firmware metadata |
 | `boot.ipxe` | the iPXE script, with relative URLs: serve the directory from anywhere |
-| `SHA256SUMS` | checksums of the four files above |
+| `base.json` | the OTP version and applications in the image, for building releases against it |
+| `*.sig` | signatures of the three images, when built with a signer |
+| `SHA256SUMS` | checksums of every file above |
 
 `--cmdline "console=ttyS0 …"` sets the kernel arguments written into
 `boot.ipxe` (default `console=ttyS0`).
 
+`--signer DIR` signs the images with the signer from `mix kubex.gen_ca`
+(in `apps/kubex_tools`; `~/.kubex/pki` by default). A `dev` build may be
+unsigned; other environments refuse to build without a signer. The image
+trusts your root CA for deployed releases ([docs/specs.md](docs/specs.md)
+§2.11.2).
+
 Which ssh keys the image trusts depends on `MIX_ENV`:
 
 - **`dev`** (default) trusts your `~/.ssh/id_{rsa,ecdsa,ed25519}.pub`;
-- **`e2e`** trusts only the test harness key. Create it once with
-  `mix kubex.e2e.key` in `apps/kubex_e2e`, then build with
+- **`e2e`** trusts only the test harness key, and is signed by a test CA.
+  Create both once with `mix kubex.e2e.key` in `apps/kubex_e2e`, then build with
   `MIX_ENV=e2e mix firmware.ipxe`. The output is in `_build/x86_64_e2e/ipxe/`.
 
 ### Boot it in QEMU

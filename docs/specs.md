@@ -103,7 +103,8 @@ the firmware app) runs `mix firmware`, then:
   priorities;
 - copies `stage1.cpio.zst` out of the system artifact;
 - writes a generic `boot.ipxe` with relative URLs, so the directory can be
-  served from anywhere, and `SHA256SUMS`;
+  served from anywhere, `base.json` (§2.11.3), the images' signatures
+  (§2.11.2), and `SHA256SUMS` of every file;
 
 all into `_build/<target>_<env>/ipxe/`. The `.fw` itself is unchanged: `/boot`
 is only dropped from what is served.
@@ -861,17 +862,24 @@ what the old one signed; rotating the root does, at the cost of new images.
 
 #### 2.11.2 Signed boot images
 
-- **The CA is in the image.** The firmware build copies the root certificate
-  (configured as `config :kubex_fw, :ca_cert`) into the rootfs as
-  `/etc/kubex/ca.pem`. Never the signer, never a key. The rootfs signature
-  therefore covers the CA the node will trust for releases.
+- **The CA is in the image.** `mix firmware.ipxe` adds the root certificate to
+  the served rootfs as `/etc/kubex/ca.pem`, the way it adds
+  `/etc/firmware.kv` (§2.3). Never the signer, never a key. The rootfs
+  signature therefore covers the CA the node will trust for releases. The
+  certificate is `config :kubex_fw, :ca_cert`, else the signer's own
+  `ca.pem`; with both, they must be the same certificate. `config/target.exs`
+  sets it to the operator's `~/.kubex/pki/ca.pem` (or `KUBEX_PKI_DIR`'s) when
+  there is one, and to the test CA for `MIX_ENV=e2e`. With none, the build
+  warns: the node will refuse every release.
 - **`mix firmware.ipxe --signer <dir>`** writes a detached CMS signature next to
   each image: `vmlinuz.sig`, `stage1.cpio.zst.sig`, `rootfs.squashfs.sig`, made
   with `openssl cms -sign -binary -noattr -outform DER`, signer certificate
   included. That is the format `imgverify` reads. They are listed in
   `SHA256SUMS`. `:public_key` cannot write CMS, so this adds `openssl` to the
-  build host's prerequisites. Without `--signer`, `MIX_ENV=dev` builds an
-  unsigned directory with a warning and every other environment refuses.
+  build host's prerequisites. `--signer` defaults to `config :kubex_fw,
+  :signer`, which only `MIX_ENV=e2e` sets. Without a signer, `MIX_ENV=dev`
+  builds an unsigned directory with a warning and every other environment
+  refuses.
 - **`boot.ipxe` gets the `imgverify` lines only with `--imgverify`.** A stock
   iPXE (QEMU's ROM, distribution `ipxe.efi`) does not trust our CA and would
   refuse every image. Only the custom iPXE built with `TRUST=` the root
@@ -890,7 +898,7 @@ what the old one signed; rotating the root does, at the cost of new images.
   A failed `imgverify` stops the script before `boot`. A production boot
   server renders its own per-node scripts (§2.7) with the same lines.
 - e2e images are signed with a test CA that `mix kubex.e2e.key` creates next to
-  the harness key ([testing.md](testing.md)).
+  the harness key, in `apps/kubex_e2e/priv/pki/` ([testing.md](testing.md)).
 
 #### 2.11.3 What a release is
 

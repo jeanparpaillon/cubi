@@ -25,7 +25,9 @@ defmodule Kubex.Ipxe.MixProject do
 
   defp deps do
     [
-      {:nerves, "~> 1.13", runtime: false}
+      {:nerves, "~> 1.13", runtime: false},
+      # Signs the served images (docs/specs.md §2.11.2).
+      {:kubex_pki, in_umbrella: true}
     ]
   end
 end

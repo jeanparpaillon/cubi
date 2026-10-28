@@ -1,6 +1,9 @@
 # The harness key is generated locally (`mix kubex.e2e.key`), never committed.
 /priv/harness_key/
 
+# The test CA is generated locally (`mix kubex.e2e.key`), never committed.
+/priv/pki/
+
 # ExUnit @tag :tmp_dir.
 /tmp/
 

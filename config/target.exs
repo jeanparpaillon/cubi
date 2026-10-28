@@ -65,6 +65,29 @@ if keys == [],
 config :nerves_ssh,
   authorized_keys: Enum.map(keys, &File.read!/1)
 
+# The root CA the node trusts for deployed releases, installed as
+# /etc/kubex/ca.pem in the served rootfs, and the PKI whose signer signs the
+# served images (docs/specs.md §2.11.2, `mix firmware.ipxe`).
+if config_env() == :e2e do
+  # The e2e firmware is signed by the harness's test CA, never the operator's
+  # (docs/testing.md §3). Generated locally, never committed.
+  pki = Path.expand("../apps/kubex_e2e/priv/pki", __DIR__)
+
+  if not File.exists?(Path.join(pki, "signer.key")),
+    do:
+      Mix.raise("""
+      No test CA in #{pki}.
+      Run `mix kubex.e2e.key` first.
+      """)
+
+  config :kubex_fw, ca_cert: Path.join(pki, "ca.pem"), signer: pki
+else
+  # The operator's root (`mix kubex.gen_ca`), if there is one. Signing stays an
+  # explicit `--signer`.
+  ca = Path.join(System.get_env("KUBEX_PKI_DIR") || Path.expand("~/.kubex/pki"), "ca.pem")
+  if File.exists?(ca), do: config(:kubex_fw, ca_cert: ca)
+end
+
 # Configure the network using vintage_net
 #
 # Update regulatory_domain to your 2-letter country code E.g., "US"

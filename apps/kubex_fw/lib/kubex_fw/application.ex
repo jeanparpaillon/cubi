@@ -37,6 +37,7 @@ defmodule KubexFw.Application do
         # Children for all targets except host
         # Starts a worker by calling: Target.Worker.start_link(arg)
         # {Target.Worker, arg},
+        {Kubex.Storage, Application.get_env(:kubex_fw, Kubex.Storage, [])}
       ]
     end
   end

@@ -602,6 +602,9 @@ steps:
    while a pool moved to other hardware still needs a deliberate `-f`. A pool
    that was cleanly exported imports anywhere. A hostid of 0 is refused like
    any foreign one. All of this was checked on OpenZFS 2.3.9 ([phase 0](phase0.md)).
+   `H` is the first 32 bits of `SHA-256("kubex-hostid:" <> machine ID)`, 1 if
+   that is 0. If `spl` is already loaded (a BEAM restart), its `spl_hostid`
+   must be `H`, or setup refuses.
 2. **Import.** `zpool import -N -o cachefile=none -d /dev <name>`:
    - `-N` because the rootfs is read-only, so nothing may automount;
    - `cachefile=none` because there is nowhere to keep one;
@@ -611,6 +614,11 @@ steps:
    listed device has no partition table or filesystem signature (`wipefs -n`).
    Never use `-f`. Anything else refuses, with a console message, and the node
    drops to restricted mode. A typo in a boot argument must never wipe a disk.
+   "Not found" means `zpool import` said *no such pool available*: any other
+   import failure (a foreign host ID, missing devices) refuses without
+   looking further. The pool is created with `-o cachefile=none -O
+   mountpoint=none`, since its root dataset has nowhere to mount on the
+   read-only rootfs.
 4. **Imported, but with different vdevs than `kubex.vdevs`** (the pool was grown
    or repaired by hand): log it, continue.
 5. **Reserved dataset `<pool>/kubex`.**
@@ -634,8 +642,11 @@ steps:
      at bootstrap or at a storage node's first join (§2.10.4). Before that, and
      in restricted mode, logs stay in RAM. For hand-booted QEMU with no cluster
      ([phase 6](phase6.md)), `kubex.zfs.testkey=<hex>` on the cmdline keys
-     `crypt`, with a warning, like `kubex.token=` (§2.8.2). Bootstrap and join
-     refuse a pool that was keyed this way.
+     `crypt`, with a warning, like `kubex.token=` (§2.8.2). `crypt` then
+     carries the user property `kubex:testkey=on`, and bootstrap and join
+     refuse a pool that has it. With a key, an existing `crypt` is unlocked
+     (`zfs load-key`) and a missing one created; without one, an existing
+     `crypt` stays locked. `crypt` itself is `canmount=off`.
 6. **The rest of the pool** is left to workloads, later.
 
 On a graceful leave or shutdown ([architecture.md](architecture.md) §3), kubex stops Khepri, then runs
@@ -791,6 +802,9 @@ opens them.
     initramfs-tools, udev and `zed` files; the system's `post-build.sh`
     removes them. The NIC and storage modules of §2.5 add 1.3 MB more; the
     system rootfs is 27.4 MB against 20.8 MB stock.
+- **util-linux `wipefs`** (`BR2_PACKAGE_UTIL_LINUX_WIPEFS`), for the blank
+  disk check before `zpool create` (§2.10.3). util-linux is already built for
+  `libblkid`; the tool adds 40 kB.
 - **Storage drivers** (`nvme`, `ahci`, `sd_mod`, `virtio_blk`, `virtio_scsi`)
   as modules, loaded before the import.
 - **Licensing.** Shipping the CDDL ZFS module next to a GPL kernel in one image

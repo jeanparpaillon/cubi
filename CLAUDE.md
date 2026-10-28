@@ -3,7 +3,7 @@
 Runs BEAM releases on a cluster without Kubernetes: nodes network-boot into BEAM,
 join with a token, and keep membership in Khepri on ZFS.
 
-**Status: phases 0–4 done; phase 6 step 1 done (phase 5 not started).** Code so far: the test harness, the firmware app and the forked Nerves system.
+**Status: phases 0–4 done; phase 6 steps 1–2 done (phase 5 not started).** Code so far: the test harness, the firmware app and the forked Nerves system.
 
 An umbrella project: `config/`, `deps/`, `_build/` and `mix.lock` are shared at
 the root, and the apps live in `apps/`.

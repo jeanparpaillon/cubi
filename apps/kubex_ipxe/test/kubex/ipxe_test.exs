@@ -55,4 +55,30 @@ defmodule Kubex.IpxeTest do
     assert script =~ ~r/\nboot\n\z/
     assert script =~ "648f236c-1b51-5f00-76b4-a24e4c12521b"
   end
+
+  test "modes are read from ls-style permissions, setuid, setgid and sticky included" do
+    assert Kubex.Ipxe.mode("-rwxr-xr-x") == 0o755
+    assert Kubex.Ipxe.mode("-rwsr-xr-x") == 0o4755
+    assert Kubex.Ipxe.mode("drwxrwxrwt") == 0o1777
+    assert Kubex.Ipxe.mode("-rwxr-Sr--") == 0o2744
+    assert Kubex.Ipxe.mode("drwx------") == 0o700
+  end
+
+  test "pseudo definitions restore mode and owner of files and directories, not the root or symlinks" do
+    listing = """
+    drwxr-xr-x 1000/1000               306 2026-10-27 15:35 squashfs-root
+    -rwsr-xr-x 0/0                 1073000 2026-10-27 15:35 squashfs-root/bin/busybox
+    lrwxrwxrwx 0/0                       7 2026-10-27 15:35 squashfs-root/bin/sh -> busybox
+    drwxrwxrwt 0/0                       3 2026-10-27 15:35 squashfs-root/tmp
+    drwxr-xr-x 33/33                     3 2026-10-27 15:35 squashfs-root/var/www
+    -rw-r--r-- 0/0                      12 2026-10-27 15:35 squashfs-root/etc/a file
+    """
+
+    assert Kubex.Ipxe.pseudo_definitions(listing) == [
+             "/bin/busybox m 4755 0 0",
+             "/tmp m 1777 0 0",
+             "/var/www m 755 33 33",
+             "/etc/a\\ file m 644 0 0"
+           ]
+  end
 end

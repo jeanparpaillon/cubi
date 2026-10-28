@@ -43,6 +43,14 @@ defmodule Kubex.E2E.Phase3FirmwareIpxeTest do
     end
   end
 
+  test "the served rootfs has no /boot, and carries the firmware metadata", %{served: dir} do
+    {listing, 0} = System.cmd("unsquashfs", ["-n", "-lln", Path.join(dir, "rootfs.squashfs")])
+
+    refute listing =~ ~r{squashfs-root/boot(/|$)}m
+    assert listing =~ ~r{^-rw-r--r-- 0/0 .* squashfs-root/etc/firmware\.kv$}m
+    assert listing =~ ~r{^-rwsr-xr-x 0/0 .* squashfs-root/bin/busybox$}m
+  end
+
   test "boot.ipxe loads what is served, by relative URL", %{served: dir} do
     script = File.read!(Path.join(dir, "boot.ipxe"))
 

@@ -92,14 +92,19 @@ the firmware app) runs `mix firmware`, then:
 
 - unzips `data/rootfs.img` and takes the kernel out of it with `unsquashfs
   -cat rootfs.img boot/bzImage`;
-- appends `/firmware.kv` to that squashfs with `mksquashfs` (the firmware
-  metadata, §2.6);
+- rebuilds that squashfs **without `/boot`**, and with `/etc/firmware.kv` (the
+  firmware metadata, §2.6). `/boot` only holds the kernel GRUB would load from
+  disk: served separately as `vmlinuz`, it would otherwise sit in every node's
+  RAM twice (5.7 MB). The rebuild needs no root, the way Nerves'
+  `merge-squashfs` works: unpack, then repack with a pseudo file restoring each
+  entry's mode and owner from `unsquashfs -lln`, and `rel2fw.sh`'s sort
+  priorities;
 - copies `stage1.cpio.zst` out of the system artifact;
 - writes a generic `boot.ipxe` with relative URLs, so the directory can be
   served from anywhere, and `SHA256SUMS`;
 
-all into `_build/<target>_<env>/ipxe/`. The kernel ships twice, 5.7 MB of it
-inside the squashfs, until the system fork drops `/boot` from the rootfs.
+all into `_build/<target>_<env>/ipxe/`. The `.fw` itself is unchanged: `/boot`
+is only dropped from what is served.
 
 ### 2.4 Stage-1 init
 
@@ -171,11 +176,10 @@ its only module is `efivarfs` ([phase 0](phase0.md) has the table). On top of it
   `a.nerves_fw_uuid` …, plus `nerves_fw_validated: "1"`. This keeps
   `Nerves.Runtime.firmware_valid?/0` and friends truthful. The UUID only exists
   once the `.fw` is built, after its squashfs is sealed, so it can't be in the
-  release's config. `mix firmware.ipxe` appends it to the served squashfs as
-  `/firmware.kv` (`key=value` lines; at the root, because a squashfs append
-  cannot add to an existing directory), and `config/runtime.exs` loads it at
-  boot. The served squashfs then describes itself, under the same signature
-  (§2.7).
+  release's config. `mix firmware.ipxe` writes it into the served squashfs as
+  `/etc/firmware.kv` (`key=value` lines, §2.3), and `config/runtime.exs` loads
+  it at boot. The served squashfs then describes itself, under the same
+  signature (§2.7).
 - Remove `ssh_subsystem_fwup` from the target deps. `mix upload` has nothing to
   write to, and a half-working update path is worse than none.
 

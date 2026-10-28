@@ -7,11 +7,11 @@ if Code.ensure_loaded?(LoggerBackends) do
 end
 
 # Firmware metadata for Nerves.Runtime (docs/specs.md §2.6). `mix firmware.ipxe`
-# appends /firmware.kv to the served rootfs, with what fwup would have written
+# puts /etc/firmware.kv in the served rootfs, with what fwup would have written
 # into the boot environment on a disk install: a diskless node has none. Only
 # images built by that task have it; others keep the default backend.
 if config_target() != :host do
-  case File.read("/firmware.kv") do
+  case File.read("/etc/firmware.kv") do
     {:ok, text} ->
       contents =
         for line <- String.split(text, "\n", trim: true),

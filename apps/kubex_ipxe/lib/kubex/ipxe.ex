@@ -7,22 +7,33 @@ defmodule Kubex.Ipxe do
   | --- | --- |
   | `vmlinuz` | `/boot/bzImage` inside the `.fw`'s rootfs: the `.fw` has no kernel resource |
   | `stage1.cpio.zst` | the system artifact's `images/` |
-  | `rootfs.squashfs` | `data/rootfs.img`, plus `/firmware.kv` appended (below) |
+  | `rootfs.squashfs` | `data/rootfs.img`, rebuilt without `/boot` and with `/etc/firmware.kv` (below) |
   | `boot.ipxe` | rendered here; relative URLs, so the directory can be served from anywhere |
   | `SHA256SUMS` | the four files above |
 
-  **Firmware metadata.** A Nerves install has `fwup` write the firmware's
-  metadata (`a.nerves_fw_version`, `a.nerves_fw_uuid`, …) into the U-Boot or
-  GRUB environment. A diskless node has no such environment, and the UUID only
-  exists once the `.fw` is built, after its squashfs is sealed. So the metadata
-  is appended to the served squashfs as `/firmware.kv`, one `key=value` per
-  line, and the firmware's `config/runtime.exs` loads it into
-  `Nerves.Runtime.KVBackend.InMemory`. It is at the root because a squashfs
-  append cannot add to an existing directory, and not under `/kubex`, which is
-  the ZFS dataset's mount point (§2.10.3).
+  **The served rootfs** is the `.fw`'s, rebuilt with two changes:
+
+    * **no `/boot`.** It only holds the kernel GRUB would load from disk, 5.7 MB
+      that iPXE serves separately as `vmlinuz` and that would otherwise sit in
+      every node's RAM a second time.
+    * **firmware metadata in `/etc/firmware.kv`.** A Nerves install has `fwup`
+      write the firmware's metadata (`a.nerves_fw_version`,
+      `a.nerves_fw_uuid`, …) into the U-Boot or GRUB environment. A diskless
+      node has no such environment, and the UUID only exists once the `.fw` is
+      built, after its squashfs is sealed. So it goes into the served squashfs,
+      one `key=value` per line, and the firmware's `config/runtime.exs` loads it
+      into `Nerves.Runtime.KVBackend.InMemory`.
+
+  The rebuild needs no root, the way Nerves' own `merge-squashfs` works:
+  unpack, then repack with a pseudo file that restores every entry's mode and
+  owner (`unsquashfs -lln`), and the same sort priorities as `rel2fw.sh`, so
+  erlinit's files still come first.
   """
 
-  @kv_file "firmware.kv"
+  @kv_path "etc/firmware.kv"
+
+  # rel2fw.sh's built-in priorities: the files read first at boot.
+  @sort_priorities "sbin/init 32764\netc/erlinit.config 32763\n"
 
   # The keys a Nerves fwup.conf writes for slot "a" on a complete install.
   @fw_keys ~w(product description version platform architecture author vcs_identifier misc uuid)
@@ -55,13 +66,13 @@ defmodule Kubex.Ipxe do
     work = Path.join(output, ".work")
     File.mkdir_p!(work)
 
-    rootfs = Path.join(output, "rootfs.squashfs")
-    File.write!(rootfs, extract!(fw, "data/rootfs.img"))
+    original = Path.join(work, "rootfs.img")
+    File.write!(original, extract!(fw, "data/rootfs.img"))
 
-    {kernel, 0} = cmd!("unsquashfs", ["-cat", rootfs, "boot/bzImage"])
+    {kernel, 0} = cmd!("unsquashfs", ["-cat", original, "boot/bzImage"])
     File.write!(Path.join(output, "vmlinuz"), kernel)
 
-    append_kv!(rootfs, kv(meta), work)
+    rebuild_rootfs!(original, Path.join(output, "rootfs.squashfs"), kv(meta), work)
 
     File.cp!(stage1, Path.join(output, "stage1.cpio.zst"))
     File.write!(Path.join(output, "boot.ipxe"), boot_script(meta, cmdline))
@@ -116,7 +127,7 @@ defmodule Kubex.Ipxe do
     end
   end
 
-  @doc "`kv/1` as the `/firmware.kv` text: `key=value` lines, sorted."
+  @doc "`kv/1` as the `/etc/firmware.kv` text: `key=value` lines, sorted."
   @spec encode_kv(%{String.t() => String.t()}) :: String.t()
   def encode_kv(kv) do
     for {key, value} <- Enum.sort(kv), into: "" do
@@ -140,18 +151,88 @@ defmodule Kubex.Ipxe do
     """
   end
 
-  defp append_kv!(rootfs, kv, work) do
-    dir = Path.join(work, "append")
-    File.mkdir_p!(dir)
-    file = Path.join(dir, @kv_file)
-    File.write!(file, encode_kv(kv))
-    # mksquashfs keeps the mode it finds; don't let the host umask decide.
-    File.chmod!(file, 0o644)
+  defp rebuild_rootfs!(input, output, kv, work) do
+    root = Path.join(work, "root")
+    {_, 0} = cmd!("unsquashfs", ["-n", "-f", "-d", root, input])
+    File.rm_rf!(Path.join(root, "boot"))
+    File.write!(Path.join(root, @kv_path), encode_kv(kv))
+
+    {listing, 0} = cmd!("unsquashfs", ["-n", "-lln", input])
+
+    pseudo =
+      listing
+      |> pseudo_definitions()
+      |> Enum.reject(&(String.starts_with?(&1, "/boot ") or String.starts_with?(&1, "/boot/")))
+      |> Kernel.++(["/#{@kv_path} m 644 0 0"])
+
+    pseudo_file = Path.join(work, "pseudo")
+    File.write!(pseudo_file, Enum.map(pseudo, &[&1, "\n"]))
+    sort_file = Path.join(work, "priorities")
+    File.write!(sort_file, @sort_priorities)
 
     {_, 0} =
-      cmd!("mksquashfs", [dir, rootfs, "-all-root", "-no-recovery", "-quiet", "-no-progress"])
+      cmd!("mksquashfs", [
+        root,
+        output,
+        "-all-root",
+        "-pseudo-override",
+        "-pf",
+        pseudo_file,
+        "-sort",
+        sort_file,
+        "-noappend",
+        "-no-recovery",
+        "-no-progress",
+        "-quiet"
+      ])
 
     :ok
+  end
+
+  @doc """
+  `mksquashfs` pseudo definitions (`path m mode uid gid`) restoring the mode
+  and owner of every directory and file in an `unsquashfs -lln` listing, the
+  image root and symlinks excepted, as Nerves' `merge-squashfs` does.
+  Extracting as a normal user loses owners and could lose setuid bits.
+  """
+  @spec pseudo_definitions(String.t()) :: [String.t()]
+  def pseudo_definitions(listing) do
+    for line <- String.split(listing, "\n", trim: true),
+        [perms, uid, gid, path] <- [listing_fields(line)],
+        String.first(perms) in ["d", "-"],
+        path != "" do
+      escaped = String.replace(path, " ", "\\ ")
+      "#{escaped} m #{perms |> mode() |> Integer.to_string(8)} #{uid} #{gid}"
+    end
+  end
+
+  defp listing_fields(line) do
+    case Regex.run(~r/^(\S{10})\s+(\d+)\/(\d+)\s+\S+\s+\S+\s+\S+\s+squashfs-root(.*)$/, line) do
+      [_, perms, uid, gid, path] -> [perms, uid, gid, path]
+      nil -> []
+    end
+  end
+
+  @doc false
+  # "-rwsr-xr-x" -> 0o4755
+  @spec mode(String.t()) :: non_neg_integer()
+  def mode(<<_type, u::binary-3, g::binary-3, o::binary-3>>) do
+    import Bitwise
+    {u_bits, suid} = triplet(u, 0o4000)
+    {g_bits, sgid} = triplet(g, 0o2000)
+    {o_bits, sticky} = triplet(o, 0o1000)
+    (u_bits <<< 6) + (g_bits <<< 3) + o_bits + suid + sgid + sticky
+  end
+
+  defp triplet(<<r, w, x>>, special) do
+    bits = if(r == ?r, do: 4, else: 0) + if(w == ?w, do: 2, else: 0)
+
+    case x do
+      ?x -> {bits + 1, 0}
+      c when c in [?s, ?t] -> {bits + 1, special}
+      c when c in [?S, ?T] -> {bits, special}
+      _ -> {bits, 0}
+    end
   end
 
   defp extract!(fw, name) do

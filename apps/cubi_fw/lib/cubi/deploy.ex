@@ -19,6 +19,15 @@ defmodule Cubi.Deploy do
   bad, never to be started again, and the release that was running is started
   again from its directory, verified again first.
 
+  **After the settle period**, shoehorn reports the exit of any application to
+  `Cubi.Deploy.ShoehornHandler`, which casts it here. If it is one of the
+  current release's own applications and the release is no longer all
+  running, the release is **rolled back** (§2.11.7): stopped, marked bad, and
+  `previous` started in its place, verified again from disk. With no
+  `previous`, or one that fails too (then bad as well), nothing runs. An exit
+  for an application that is running again, after an install already rolled
+  back, is stale and ignored.
+
   On a diskless node `/cubi` is a tmpfs mounted here; on a storage node it is
   the pool's (`Cubi.Storage`), with `/cubi/releases` its own dataset.
   """
@@ -90,6 +99,18 @@ defmodule Cubi.Deploy do
     {:reply, reply, state}
   end
 
+  @impl GenServer
+  def handle_cast({:exited, app, reason}, %{current: %{manifest: manifest}} = state) do
+    node = node_info(state.opts)
+    own = for %{"name" => name} <- Loader.own_apps(manifest, node.lib), do: name
+
+    if Atom.to_string(app) in own and not Loader.running?(manifest),
+      do: {:noreply, rollback(state, node, {app, reason})},
+      else: {:noreply, state}
+  end
+
+  def handle_cast({:exited, _app, _reason}, state), do: {:noreply, state}
+
   defp do_install(archive, progress, state) do
     node = node_info(state.opts)
     stored = Store.state(state.root)
@@ -153,31 +174,65 @@ defmodule Cubi.Deploy do
     end
   end
 
-  # The release stopped for the install, back as it was; verified again from
-  # its directory, signer dates excepted (§2.11.4).
+  # The release stopped for the install, back as it was.
   defp restart_current(%{current: nil} = state, _node, _progress), do: state
 
   defp restart_current(%{current: current} = state, node, progress) do
-    version = current.version
-    progress.("restarting #{version}")
+    progress.("restarting #{current.version}")
 
-    result =
-      with {:ok, entries} <- Store.entries(state.root, version),
-           {:ok, ca} <- read_ca(state.opts[:ca_cert]),
-           {:ok, _} <- Archive.verify(entries, ca, check_dates: false),
-           :ok <- Loader.load(Store.version_dir(state.root, version), current.manifest, node.lib) do
-        Loader.start(current.manifest)
-      end
-
-    case result do
-      :ok ->
+    case start_from_disk(state, current.version, node) do
+      {:ok, _manifest} ->
         state
 
       {:error, reason} ->
-        Logger.error("deploy: could not restart #{version}: #{inspect(reason)}")
-        Loader.stop(current.manifest, node.lib)
+        Logger.error("deploy: could not restart #{current.version}: #{inspect(reason)}")
         %{state | current: nil}
     end
+  end
+
+  # Starts a version from its directory, verified again first, signer dates
+  # excepted (§2.11.4). Leaves nothing loaded if it fails.
+  defp start_from_disk(state, version, node) do
+    with {:ok, entries} <- Store.entries(state.root, version),
+         {:ok, ca} <- read_ca(state.opts[:ca_cert]),
+         {:ok, manifest} <- Archive.verify(entries, ca, check_dates: false),
+         :ok <- Loader.load(Store.version_dir(state.root, version), manifest, node.lib) do
+      case Loader.start(manifest) do
+        :ok ->
+          {:ok, manifest}
+
+        {:error, _} = error ->
+          Loader.stop(manifest, node.lib)
+          error
+      end
+    end
+  end
+
+  defp rollback(%{current: current} = state, node, cause) do
+    stored = Store.state(state.root)
+    Logger.error("deploy: #{current.version} exited (#{inspect(cause)}), rolling back")
+    Loader.stop(current.manifest, node.lib)
+    bad = Enum.uniq(stored.bad ++ [current.version])
+
+    {new_current, bad} =
+      case stored.previous && start_from_disk(state, stored.previous, node) do
+        {:ok, manifest} ->
+          Logger.warning("deploy: rolled back to #{stored.previous}")
+          {%{manifest: manifest, version: stored.previous}, bad}
+
+        nil ->
+          Logger.warning("deploy: no previous release, nothing runs")
+          {nil, bad}
+
+        {:error, reason} ->
+          Logger.error("deploy: previous #{stored.previous} failed too: #{inspect(reason)}")
+          {nil, Enum.uniq(bad ++ [stored.previous])}
+      end
+
+    version = new_current && new_current.version
+    Store.put_state!(state.root, %{current: version, previous: nil, bad: bad})
+    Store.prune!(state.root, [version])
+    %{state | current: new_current}
   end
 
   defp current_name(%{current: nil}), do: nil

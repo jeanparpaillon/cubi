@@ -113,4 +113,72 @@ defmodule Cubi.DeployTest do
     assert running_vsn(ctx.app) == "0.1.0"
     assert Cubi.Deploy.state(ctx.deploy) == %{current: "0.1.0", previous: nil, bad: []}
   end
+
+  describe "after the settle period" do
+    # What shoehorn would cast: the release's application dies for real.
+    defp crash(ctx) do
+      app = String.to_atom(ctx.app)
+      {:ok, sup} = :application.get_supervisor(app)
+      ref = Process.monitor(sup)
+      Process.exit(sup, :kill)
+      assert_receive {:DOWN, ^ref, _, _, _}
+      wait_until(fn -> not List.keymember?(Application.started_applications(), app, 0) end)
+      GenServer.cast(ctx.deploy, {:exited, app, :killed})
+      # A call after the cast: it has been handled.
+      Cubi.Deploy.state(ctx.deploy)
+    end
+
+    defp wait_until(fun, tries \\ 50) do
+      cond do
+        fun.() ->
+          :ok
+
+        tries == 0 ->
+          flunk("condition never met")
+
+        true ->
+          Process.sleep(20)
+          wait_until(fun, tries - 1)
+      end
+    end
+
+    test "a release that dies is rolled back to the previous one, marked bad", ctx do
+      {:ok, _} = install(ctx, "0.1.0")
+      {:ok, _} = install(ctx, "0.2.0")
+
+      assert crash(ctx) == %{current: "0.1.0", previous: nil, bad: ["0.2.0"]}
+      assert running_vsn(ctx.app) == "0.1.0"
+      assert Enum.sort(File.ls!(ctx.root)) == ~w(0.1.0 incoming state.json)
+      assert install(ctx, "0.2.0") == {:error, {:bad_version, "0.2.0"}}
+    end
+
+    test "with no previous release, nothing runs", ctx do
+      {:ok, _} = install(ctx, "0.1.0")
+
+      assert crash(ctx) == %{current: nil, previous: nil, bad: ["0.1.0"]}
+      assert running_vsn(ctx.app) == nil
+
+      # A new version can still be deployed.
+      assert {:ok, _} = install(ctx, "0.3.0")
+    end
+
+    test "a previous release that fails to start again is marked bad too", ctx do
+      {:ok, _} = install(ctx, "0.1.0")
+      {:ok, _} = install(ctx, "0.2.0")
+      File.write!(Path.join([ctx.root, "0.1.0", "releases/0.1.0/sys.config"]), "tampered")
+
+      assert crash(ctx) == %{current: nil, previous: nil, bad: ["0.2.0", "0.1.0"]}
+      assert running_vsn(ctx.app) == nil
+    end
+
+    test "an exit of an application that runs again, or of another one, is ignored", ctx do
+      {:ok, _} = install(ctx, "0.1.0")
+
+      GenServer.cast(ctx.deploy, {:exited, String.to_atom(ctx.app), :killed})
+      GenServer.cast(ctx.deploy, {:exited, :logger, :killed})
+
+      assert Cubi.Deploy.state(ctx.deploy) == %{current: "0.1.0", previous: nil, bad: []}
+      assert running_vsn(ctx.app) == "0.1.0"
+    end
+  end
 end

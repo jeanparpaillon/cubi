@@ -3,8 +3,9 @@ defmodule Cubi.E2E.Milestone1DeployNodeTest do
   docs/milestone1.md, the node side of a deploy (docs/specs.md §2.11.5,
   §2.11.6): `examples/cubi_hello`, built against the e2e image and signed by
   the test CA, sent through the `cubi_deploy` ssh subsystem of a diskless
-  node, runs there; an unsigned one is refused. `mix cubi.deploy` and the
-  fixtures that crash are later steps.
+  node, runs there; an unsigned one is refused. Killed after it settled, it is
+  rolled back through shoehorn and `Cubi.Deploy.ShoehornHandler` (§2.11.7).
+  `mix cubi.deploy` and the fixtures that crash are later steps.
   """
   use Cubi.E2E.Case
 
@@ -67,5 +68,26 @@ defmodule Cubi.E2E.Milestone1DeployNodeTest do
             "/proc/mounts" |> File.read!() |> String.contains?("tmpfs /cubi tmpfs")}
            """) ==
              {%{current: "0.1.0", previous: nil, bad: []}, ~w(0.1.0 incoming state.json), true}
+
+    # Dies after its settle period: shoehorn hears of it, and with no previous
+    # release, nothing runs any more.
+    assert Node.eval(vm, ~S"""
+           {:ok, sup} = :application.get_supervisor(:cubi_hello)
+           Process.exit(sup, :kill)
+
+           Enum.find_value(1..50, fn _ ->
+             Process.sleep(100)
+             state = Cubi.Deploy.state()
+             if state.current == nil, do: state
+           end)
+           """) == %{current: nil, previous: nil, bad: ["0.1.0"]}
+
+    assert Node.eval(vm, ~S"""
+           {Application.started_applications() |> List.keymember?(:cubi_hello, 0),
+            Code.ensure_loaded?(CubiHello), File.ls!("/cubi/releases") |> Enum.sort()}
+           """) == {false, false, ~w(incoming state.json)}
+
+    # The image itself carries on.
+    assert Node.eval(vm, "Application.started_applications() |> List.keymember?(:cubi_fw, 0)")
   end
 end

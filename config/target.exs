@@ -4,7 +4,11 @@ import Config
 # library documentation for more control in ordering how OTP
 # applications are started and handling failures.
 
-config :shoehorn, init: [:nerves_runtime, :nerves_pack]
+config :shoehorn,
+  init: [:nerves_runtime, :nerves_pack],
+  # Rolls back a deployed release whose application exits (docs/specs.md
+  # §2.11.7); the image's own applications get shoehorn's default, nothing.
+  handler: Cubi.Deploy.ShoehornHandler
 
 # Enable the system startup guard to check that all OTP applications
 # started. If they didn't and you're on a Nerves system that supports

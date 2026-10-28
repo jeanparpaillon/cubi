@@ -1082,23 +1082,34 @@ deploying another version of the same name replaces it.
 
 shoehorn installs a `logger` filter that turns every "application exited"
 report into a call to its handler, for applications started at any time, not
-only at boot **(verify)**. cubi sets `config :shoehorn, handler:
+only at boot (checked on a node, [phase 0](phase0.md)). It is a *primary*
+filter, so it only sees what the primary log level lets through: a temporary
+application's exit is a `:notice`, and a level above it would hide every
+release failure. cubi sets `config :shoehorn, handler:
 Cubi.Deploy.ShoehornHandler`:
 
 - It returns `{:continue, state}` for every application. A dead base image
-  application is left to shoehorn's usual behaviour, never a halt from cubi.
-- For an application of `current` that exited with any reason other than
-  `:stopped`, it casts `{:failed, app, reason}` to `Cubi.Deploy` and returns
-  at once. It never stops or starts anything itself: it runs inside shoehorn's
-  report handler. Exits caused by `Cubi.Deploy`'s own stop are `:stopped` and
-  ignored.
+  application is left to shoehorn's usual behaviour (the default handler does
+  nothing), never a halt from cubi.
+- For any application that exited with a reason other than `:stopped`, it
+  casts `{:exited, app, reason}` to `Cubi.Deploy` and returns at once. It
+  never stops or starts anything itself: it runs inside shoehorn's report
+  handler, under a 30 s halt timer, and a raise there halts the node; a cast
+  cannot raise. Exits caused by `Cubi.Deploy`'s own stop are `:stopped` and
+  not passed on. Which exits concern the release is `Cubi.Deploy`'s call.
 
-`Cubi.Deploy` then **rolls back**: it stops `current` (§2.11.6), adds its
-version to `bad`, and starts `previous`, which becomes `current`, with
-`previous` left `null`. With no `previous`, it only stops the release. A
-version in `bad` is never started again: not at boot, and not when the same
-archive is deployed again, which is refused. Deploying a new version is the
-only way forward.
+`Cubi.Deploy` acts on an exit of one of the current release's own
+applications while that release is no longer all running. An exit for an
+application that runs again is stale: an install that already rolled back
+during its settle period, and restarted the same application from the
+previous version, is not rolled back twice. It then **rolls back**: it stops
+`current` (§2.11.6), adds its version to `bad`, and starts `previous`,
+verified again from disk, which becomes `current`, with `previous` left
+`null`. With no `previous` it only stops the release; a `previous` that fails
+to start is marked bad as well, and nothing runs. Directories of bad versions
+are deleted. A version in `bad` is never started again: not at boot, and not
+when the same archive is deployed again, which is refused. Deploying a new
+version is the only way forward.
 
 **The settle period** (`config :cubi_fw, Cubi.Deploy, settle:`, in ms, default
 10 s; a node setting, since the subsystem takes no arguments) is the window during an install

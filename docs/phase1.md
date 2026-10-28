@@ -6,8 +6,10 @@ Part of the kubex node boot plan: design in [specs.md](specs.md), open questions
       In `apps/kubex_e2e` and `apps/kubex_fw`. The acceptance test is `apps/kubex_e2e/test/phase1_direct_boot_test.exs`. It takes
       the kernel from `KUBEX_E2E_KERNEL`, builds stage-1 from `stage1/`, and takes the rootfs from the
       e2e `.fw` in `_build/x86_64_e2e/` (`Kubex.E2E.Artifacts`).
-- [x] Write stage-1 (busybox script) and build its cpio by hand: [`stage1/init`](../stage1/init) and
+- [x] Write stage-1 (busybox script) and build its cpio by hand: `stage1/init` and
       `elixir stage1/build.exs [--mode prod|dev]`. Tested by `apps/kubex_e2e/test/stage1_test.exs`.
+      Since [phase 2](phase2.md), `init` lives in the system fork (`apps/kubex_system_x86_64/stage1/`) and Buildroot
+      builds the archive; `build.exs` is gone.
 - [x] Extract `rootfs.squashfs` from a stock `.fw`: `unzip -p kubex_fw.fw data/rootfs.img > rootfs.squashfs`,
       then `echo rootfs.squashfs | cpio -o -H newc --owner 0:0 > rootfs.cpio`. The stock kernel has no initramfs
       support ([phase 0](phase0.md)), so until [phase 2](phase2.md) the kernel is a borrowed one

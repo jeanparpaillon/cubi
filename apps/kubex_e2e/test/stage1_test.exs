@@ -63,7 +63,7 @@ defmodule Kubex.E2E.Stage1Test do
       })
 
     Console.await(vm, ~r/kubex stage-1: no \/rootfs.squashfs in the initramfs/, 60_000)
-    Console.await(vm, ~r/kubex stage-1: rebooting in 2 s/, 5_000)
+    Console.await(vm, ~r/kubex stage-1: rebooting in 10 s/, 5_000)
     Console.await(vm, ~r/Linux version/, 30_000)
     refute Console.output(vm) =~ "dropping to a shell"
   end

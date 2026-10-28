@@ -97,7 +97,11 @@ the squashfs, until the system fork drops `/boot` from the rootfs.
 ### 2.4 Stage-1 init
 
 This is `/init` in a tiny cpio. For now it is a busybox `sh` script,
-[`stage1/init`](../stage1/init), built by `elixir stage1/build.exs`. Production
+`stage1/init` in the system fork, built by Buildroot: `package/kubex-stage1`
+makes a ~200 KB static busybox with only the applets the script uses, and
+`post-createfs.sh` assembles `images/stage1.cpio.zst` and
+`images/stage1-dev.cpio.zst` (~105 KB each) with the kernel's
+`gen_init_cpio`. Production
 needs a small static C program instead, because busybox in the initramfs is a
 shell that `rdinit=` can reach ([security.md](security.md) §5). Its whole job:
 
@@ -117,8 +121,8 @@ shell that `rdinit=` can reach ([security.md](security.md) §5). Its whole job:
 The archive also ships `/dev/console` and an empty `/kubex` directory. The
 kernel does not create parent directories when it unpacks an initrd, so
 iPXE's `initrd … /kubex/token` needs `/kubex` to exist in an earlier archive.
-The build writes the archive itself, with owner 0 and mtime 0, so it needs no
-root and is reproducible.
+`gen_init_cpio` writes the device node without root, with owner 0 and mtime 0,
+so the archive is reproducible.
 
 `switch_root` empties the old rootfs, but the loop device keeps the squashfs
 file alive. A failure at any step prints `kubex stage-1: …` on the console.
@@ -743,9 +747,14 @@ opens them.
     configure treats libudev as optional. The plan is a copy of the package in
     the system's `BR2_EXTERNAL` with that dependency dropped, rather than
     switching `/dev` management to eudev for a library nobody runs.
-  - **About +3.3 MB in the gzip squashfs** (≈ 15 MB unpacked, `zfs.ko` alone
-    11.4 MB once stripped), estimated from a musl build of 2.3.9. The exact
-    number comes from the phase 2 build ([phase 0](phase0.md)).
+  - **+4.9 MB in the gzip squashfs**, measured on the phase 2 build: modules,
+    `zpool`/`zfs`/`zdb`/`mount.zfs` and their libraries, `libcurl`, `libtirpc`
+    and `libaio` included (`zfs.ko` alone is 10.1 MB unpacked). `libzpool` plus
+    `zdb` is 1.8 MB of that, the obvious cut if size matters. `make install`
+    also ships the OpenZFS test suite (34 MB), kernel headers, dracut,
+    initramfs-tools, udev and `zed` files; the system's `post-build.sh`
+    removes them. The NIC and storage modules of §2.5 add 1.3 MB more; the
+    system rootfs is 27.4 MB against 20.8 MB stock.
 - **Storage drivers** (`nvme`, `ahci`, `sd_mod`, `virtio_blk`, `virtio_scsi`)
   as modules, loaded before the import.
 - **Licensing.** Shipping the CDDL ZFS module next to a GPL kernel in one image

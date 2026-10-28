@@ -56,7 +56,8 @@ defmodule KubexFw.MixProject do
       # bumps to Nerves systems. Since these include Linux kernel and Erlang
       # version updates, please review their release notes in case
       # changes to your application are needed.
-      {:nerves_system_x86_64, "1.34.0", runtime: false, targets: :x86_64}
+      {:kubex_system_x86_64,
+       in_umbrella: true, runtime: false, targets: :x86_64, nerves: [compile: true]}
     ]
   end
 

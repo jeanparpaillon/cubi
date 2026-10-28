@@ -1015,8 +1015,12 @@ Like `mix upload`, the transport is ssh, and the session's authorized keys are
 `nerves_ssh`'s. Erlang distribution stays off. The ssh session decides who may
 *send* a release; only the signature decides whether it is installed.
 
-- **On the node,** `cubi_deploy` is an ssh subsystem registered with
-  `nerves_ssh` (`subsystems:`), the way `ssh_subsystem_fwup` is. It reads the
+- **On the node,** `cubi_deploy` is an ssh subsystem
+  (`Cubi.Deploy.Subsystem`), listed in `config :nerves_ssh, subsystems:` next
+  to the default sftp. Not added at runtime with `NervesSSH.add_subsystem/2`:
+  `nerves_ssh` rebuilds its daemon from its config whenever it restarts, which
+  it does at least once at boot (no host key yet), and a runtime addition is
+  lost then. It reads the
   archive from the channel up to EOF, at most 256 MB (it lands in RAM on a
   diskless node), into `/cubi/releases/incoming/`, then verifies (§2.11.4),
   unpacks to `/cubi/releases/<version>/` and installs (§2.11.6).
@@ -1046,7 +1050,9 @@ deploying another version of the same name replaces it.
 - **State** is `/cubi/releases/state.json`: `current`, `previous` (versions or
   `null`) and `bad` (a list of versions), written to a temporary file and
   renamed. Only the directories of `current`, `previous` and an incoming
-  version are kept; older ones are deleted after a successful install.
+  version are kept; older ones are deleted after a successful install. A
+  version directory keeps the archive's `manifest.json`, `manifest.sig` and
+  `signer.pem`, so it can be verified again from disk (`Cubi.Deploy.Store`).
 - **Load.** For each application dir: `:code.add_patha(ebin)`, then
   `Application.load/1`; then `sys.config` through `Application.put_all_env/1`.
 - **Start.** `Application.ensure_all_started(app, :temporary)` for each entry of
@@ -1060,7 +1066,13 @@ deploying another version of the same name replaces it.
   old code, so nothing of a stopped release survives. Two versions of a
   release are never loaded at once.
 - **Install** = verify, stop `current`, load and start the new version, wait the
-  settle period, then `previous` ← `current` ← new version.
+  settle period, then `previous` ← `current` ← new version. Re-deploying the
+  version already running is refused. A load or start error, or one of
+  `start`'s applications not running at any check during the settle period
+  (every 200 ms), fails the install: the new version is stopped, marked bad and
+  its directory deleted, and the release that was running is verified again
+  from disk (signer dates excepted) and started again. `Cubi.Deploy` runs one
+  install at a time.
 - **Boot.** `Cubi.Deploy` starts after shoehorn's `init` list
   (`config :shoehorn, init: [:nerves_runtime, :nerves_pack, :cubi_fw]`),
   verifies `current` again and starts it. A `current` that fails verification
@@ -1088,7 +1100,8 @@ version in `bad` is never started again: not at boot, and not when the same
 archive is deployed again, which is refused. Deploying a new version is the
 only way forward.
 
-**The settle period** (`--settle`, default 10 s) is the window during an install
+**The settle period** (`config :cubi_fw, Cubi.Deploy, settle:`, in ms, default
+10 s; a node setting, since the subsystem takes no arguments) is the window during an install
 in which a failure makes the deploy itself fail (§2.11.5). The rollback is the
 same during and after it: in milestone 1, *any* later exit of a `current`
 application rolls back too, even days later. Whether a release should instead

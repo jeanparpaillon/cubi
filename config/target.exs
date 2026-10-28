@@ -63,7 +63,15 @@ if keys == [],
     """)
 
 config :nerves_ssh,
-  authorized_keys: Enum.map(keys, &File.read!/1)
+  authorized_keys: Enum.map(keys, &File.read!/1),
+  # nerves_ssh's default sftp, plus `ssh -s <node> cubi_deploy`
+  # (docs/specs.md §2.11.5). Set here rather than added at runtime: nerves_ssh
+  # rebuilds its daemon from this list whenever it restarts, which it does at
+  # least once at boot. It adds `fwup` back by itself.
+  subsystems: [
+    {~c"sftp", {:ssh_sftpd, [cwd: ~c"/"]}},
+    {~c"cubi_deploy", {Cubi.Deploy.Subsystem, []}}
+  ]
 
 # The root CA the node trusts for deployed releases, installed as
 # /etc/cubi/ca.pem in the served rootfs, and the PKI whose signer signs the

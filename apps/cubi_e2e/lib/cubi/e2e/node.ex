@@ -42,6 +42,51 @@ defmodule Cubi.E2E.Node do
     end
   end
 
+  @doc """
+  Runs ssh subsystem `name` on the guest, as `ssh -s <guest> <name> < data`
+  would: sends `data`, then EOF, and returns the lines it printed and its
+  exit status. Waits for ssh like `eval/3`.
+  """
+  @spec subsystem(GenServer.server(), String.t(), binary(), timeout()) ::
+          {[String.t()], non_neg_integer() | nil}
+  def subsystem(vm, name, data, timeout \\ 120_000) do
+    port = VM.info(vm).paths.ssh_port
+    deadline = System.monotonic_time(:millisecond) + timeout
+    conn = connect(port, deadline)
+
+    try do
+      {:ok, channel} = :ssh_connection.session_channel(conn, remaining(deadline))
+
+      :success =
+        :ssh_connection.subsystem(conn, channel, String.to_charlist(name), remaining(deadline))
+
+      # The guest may answer and close before everything is sent.
+      _ = :ssh_connection.send(conn, channel, data, remaining(deadline))
+      _ = :ssh_connection.send_eof(conn, channel)
+      collect_status(conn, channel, [], nil, remaining(deadline))
+    after
+      :ssh.close(conn)
+    end
+  end
+
+  defp collect_status(conn, channel, acc, status, timeout) do
+    receive do
+      {:ssh_cm, ^conn, {:data, ^channel, 0, data}} ->
+        collect_status(conn, channel, [acc, data], status, timeout)
+
+      {:ssh_cm, ^conn, {:exit_status, ^channel, s}} ->
+        collect_status(conn, channel, acc, s, timeout)
+
+      {:ssh_cm, ^conn, {:closed, ^channel}} ->
+        {acc |> IO.iodata_to_binary() |> String.split("\n", trim: true), status}
+
+      {:ssh_cm, ^conn, _} ->
+        collect_status(conn, channel, acc, status, timeout)
+    after
+      timeout -> raise "ssh subsystem timed out after #{timeout} ms"
+    end
+  end
+
   defp wrap(code) do
     """
     "KBX:" <> Base.encode64(:erlang.term_to_binary((fn ->

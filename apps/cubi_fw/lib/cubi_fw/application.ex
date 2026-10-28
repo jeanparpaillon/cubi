@@ -37,7 +37,12 @@ defmodule CubiFw.Application do
         # Children for all targets except host
         # Starts a worker by calling: Target.Worker.start_link(arg)
         # {Target.Worker, arg},
-        {Cubi.Storage, Application.get_env(:cubi_fw, Cubi.Storage, [])}
+        {Cubi.Storage, Application.get_env(:cubi_fw, Cubi.Storage, [])},
+        {Cubi.Deploy,
+         Keyword.merge(
+           [wait_storage: true, tmpfs: "/cubi"],
+           Application.get_env(:cubi_fw, Cubi.Deploy, [])
+         )}
       ]
     end
   end

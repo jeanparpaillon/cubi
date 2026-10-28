@@ -85,7 +85,11 @@ defmodule Cubi.E2E.Phase6StorageTest do
     assert Node.eval(vm, ~S"""
            File.read!("/proc/mounts") |> String.split("\n") |> Enum.filter(&(&1 =~ " zfs "))
            |> Enum.map(&(&1 |> String.split(" ") |> Enum.take(2)))
-           """) == [["cubi/cubi", "/cubi"], ["cubi/cubi/identity", "/cubi/identity"]]
+           """) == [
+             ["cubi/cubi", "/cubi"],
+             ["cubi/cubi/identity", "/cubi/identity"],
+             ["cubi/cubi/releases", "/cubi/releases"]
+           ]
 
     # Another pool name over those disks: they hold one already, refused.
     vm =

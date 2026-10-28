@@ -87,8 +87,10 @@ defmodule Cubi.Storage.PoolTest do
              "zfs list -H -o name -r cubi",
              "zfs create -o mountpoint=legacy -o compression=lz4 -o atime=off -o sync=standard -o refreservation=4G cubi/cubi",
              "zfs create cubi/cubi/identity",
+             "zfs create cubi/cubi/releases",
              "mount.zfs cubi/cubi #{k}",
              "mount.zfs cubi/cubi/identity #{k}/identity",
+             "mount.zfs cubi/cubi/releases #{k}/releases",
              "zfs list -H -o name -r cubi",
              "zfs create -o encryption=aes-256-gcm -o keyformat=hex -o keylocation=prompt -o canmount=off -o cubi:testkey=on cubi/cubi/crypt",
              "zfs create cubi/cubi/crypt/khepri",
@@ -98,6 +100,7 @@ defmodule Cubi.Storage.PoolTest do
            ]
 
     assert File.dir?(Path.join(k, "identity"))
+    assert File.dir?(Path.join(k, "releases"))
   end
 
   test "the key goes on stdin, never in argv", %{args: args, tmp_dir: dir} do
@@ -170,12 +173,13 @@ defmodule Cubi.Storage.PoolTest do
     File.write!(Path.join(dir, "mounts"), """
     cubi/cubi #{k} zfs rw,noatime,xattr,noacl 0 0
     cubi/cubi/identity #{k}/identity zfs rw,noatime,xattr,noacl 0 0
+    cubi/cubi/releases #{k}/releases zfs rw,noatime,xattr,noacl 0 0
     cubi/cubi/crypt/khepri #{k}/khepri zfs rw,noatime,xattr,noacl 0 0
     cubi/cubi/crypt/log #{k}/log zfs rw,noatime,xattr,noacl 0 0
     """)
 
     datasets =
-      ~w(cubi cubi/cubi cubi/cubi/identity cubi/cubi/crypt cubi/cubi/crypt/khepri cubi/cubi/crypt/log)
+      ~w(cubi cubi/cubi cubi/cubi/identity cubi/cubi/releases cubi/cubi/crypt cubi/cubi/crypt/khepri cubi/cubi/crypt/log)
 
     responses = [
       {~w(/usr/sbin/zfs list), {Enum.join(datasets, "\n") <> "\n", 0}},

@@ -17,6 +17,7 @@ defmodule CubiFw.MixProject do
       archives: [nerves_bootstrap: "~> 1.17"],
       listeners: listeners(Mix.target(), Mix.env()),
       start_permanent: Mix.env() == :prod,
+      elixirc_paths: elixirc_paths(Mix.env()),
       deps: deps(),
       releases: [{@app, release()}]
     ]
@@ -25,10 +26,13 @@ defmodule CubiFw.MixProject do
   # Run "mix help compile.app" to learn about applications.
   def application do
     [
-      extra_applications: [:logger, :runtime_tools],
+      extra_applications: [:logger, :runtime_tools, :ssh],
       mod: {CubiFw.Application, []}
     ]
   end
+
+  defp elixirc_paths(:test), do: ["lib", "test/support"]
+  defp elixirc_paths(_), do: ["lib"]
 
   def cli do
     [preferred_targets: [run: :host, test: :host]]
@@ -42,6 +46,8 @@ defmodule CubiFw.MixProject do
       # `mix firmware.ipxe` (docs/specs.md §2.3); build-time only.
       {:cubi_ipxe, in_umbrella: true, runtime: false},
       {:shoehorn, "~> 0.9.1"},
+      # Verifies deployed releases on the node (docs/specs.md §2.11.4).
+      {:cubi_pki, in_umbrella: true},
       {:logger_backends, "~> 1.0"},
       {:ring_logger, "~> 0.11.0"},
       {:toolshed, "~> 0.5.0"},

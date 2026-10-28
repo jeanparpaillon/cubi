@@ -7,8 +7,9 @@ defmodule Cubi.Storage.Pool do
   1. load `spl` with a host ID derived from the machine ID, then `zfs`;
   2. import the pool, or create it if none is found, `cubi.zfs.create=1` was
      given and every listed disk is blank (`wipefs`). Never `-f`;
-  3. create what is missing of `<pool>/cubi` and `<pool>/cubi/identity`,
-     mount them on `/cubi` and `/cubi/identity`;
+  3. create what is missing of `<pool>/cubi`, `<pool>/cubi/identity` and
+     `<pool>/cubi/releases`, mount them on `/cubi`, `/cubi/identity` and
+     `/cubi/releases` (deployed releases, §2.11.6);
   4. with a key, create or unlock `<pool>/cubi/crypt` and mount its
      children on `/cubi/khepri` and `/cubi/log`. Without one, an existing
      `crypt` stays locked.
@@ -196,7 +197,7 @@ defmodule Cubi.Storage.Pool do
     end
   end
 
-  ## 3. <pool>/cubi and identity
+  ## 3. <pool>/cubi, identity and releases
 
   defp cubi_tree(pool, opts) do
     datasets = datasets(pool, opts)
@@ -207,11 +208,22 @@ defmodule Cubi.Storage.Pool do
       ~w(mountpoint=legacy compression=lz4 atime=off sync=standard) ++
         ["refreservation=#{opts[:refreservation]}"]
 
+    children = ~w(identity releases)
+
     with :ok <- ensure(datasets, base, props, opts),
-         :ok <- ensure(datasets, base <> "/identity", [], opts),
+         :ok <- each(children, &ensure(datasets, "#{base}/#{&1}", [], opts)),
          :ok <- mount(base, opts[:mountpoint], opts) do
-      mount(base <> "/identity", Path.join(opts[:mountpoint], "identity"), opts)
+      each(children, &mount("#{base}/#{&1}", Path.join(opts[:mountpoint], &1), opts))
     end
+  end
+
+  defp each(items, fun) do
+    Enum.reduce_while(items, :ok, fn item, :ok ->
+      case fun.(item) do
+        :ok -> {:cont, :ok}
+        error -> {:halt, error}
+      end
+    end)
   end
 
   defp datasets(pool, opts) do

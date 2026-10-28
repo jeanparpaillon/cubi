@@ -114,6 +114,54 @@ defmodule Cubi.DeployTest do
     assert Cubi.Deploy.state(ctx.deploy) == %{current: "0.1.0", previous: nil, bad: []}
   end
 
+  describe "at start" do
+    defp restart(ctx) do
+      :ok = stop_supervised(Cubi.Deploy)
+      cleanup(ctx.app)
+      refute running_vsn(ctx.app)
+
+      deploy =
+        start_supervised!(
+          {Cubi.Deploy,
+           name: nil,
+           root: ctx.root,
+           ca_cert: Cubi.Pki.paths(ctx.pki).ca_cert,
+           settle: 600,
+           node: %{otp_release: to_string(:erlang.system_info(:otp_release)), lib: %{}}}
+        )
+
+      # Booting happens in handle_continue: a call waits for it.
+      _ = Cubi.Deploy.state(deploy)
+      deploy
+    end
+
+    test "the current release is started again, verified from disk", ctx do
+      {:ok, _} = install(ctx, "0.1.0")
+      {:ok, _} = install(ctx, "0.2.0")
+
+      deploy = restart(ctx)
+
+      assert running_vsn(ctx.app) == "0.2.0"
+      assert Cubi.Deploy.state(deploy) == %{current: "0.2.0", previous: "0.1.0", bad: []}
+    end
+
+    test "a current release changed on disk falls back to the previous one", ctx do
+      {:ok, _} = install(ctx, "0.1.0")
+      {:ok, _} = install(ctx, "0.2.0")
+      File.write!(Path.join([ctx.root, "0.2.0", "releases/0.2.0/sys.config"]), "tampered")
+
+      deploy = restart(ctx)
+
+      assert running_vsn(ctx.app) == "0.1.0"
+      assert Cubi.Deploy.state(deploy) == %{current: "0.1.0", previous: nil, bad: ["0.2.0"]}
+    end
+
+    test "nothing recorded, nothing started", ctx do
+      deploy = restart(ctx)
+      assert Cubi.Deploy.state(deploy) == %{current: nil, previous: nil, bad: []}
+    end
+  end
+
   describe "after the settle period" do
     # What shoehorn would cast: the release's application dies for real.
     defp crash(ctx) do

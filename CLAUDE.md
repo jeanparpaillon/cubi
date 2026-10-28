@@ -3,7 +3,7 @@
 Runs BEAM releases on a cluster without Kubernetes: nodes network-boot into BEAM,
 join with a token, and keep membership in Khepri on ZFS.
 
-**Status: phases 0–4 done; phase 6 steps 1–3 done (phase 5 not started).** Code so far: the test harness, the firmware app and the forked Nerves system.
+**Status: phases 0–4 done; phase 6 steps 1–3 done (phase 5 not started); [milestone 1](docs/milestone1.md) done: signed images, and signed releases deployed onto running nodes.** Code so far: the test harness, the firmware app, the forked Nerves system, the PKI and the operator's tasks.
 
 An umbrella project: `config/`, `deps/`, `_build/` and `mix.lock` are shared at
 the root, and the apps live in `apps/`.
@@ -14,8 +14,8 @@ the root, and the apps live in `apps/`.
 | `apps/cubi_system_x86_64` | The Nerves system, a **git submodule**: branch `cubi` = upstream `nerves_system_x86_64` v1.34.0 plus the cubi delta (kernel options, `package/cubi-zfs`, the stage-1 initramfs in `stage1/` + `package/cubi-stage1`). Remote `upstream` is the vanilla repo; no `origin` yet. Commit inside it, then stage the gitlink here. See its README |
 | `apps/cubi_ipxe` | `mix firmware.ipxe` ([docs/specs.md](docs/specs.md) §2.3): runs `mix firmware`, then writes the served directory `_build/<target>_<env>/ipxe/`. A build-time dependency of `cubi_fw`, never in a release |
 | `apps/cubi_pki` | The operator's PKI ([docs/specs.md](docs/specs.md) §2.11.1, §2.11.4): `Cubi.Pki` generates the root CA and signer, signs and verifies with `:public_key` only, so it runs on the node too; `Cubi.Pki.Archive` reads, writes, signs and verifies release archives for both sides; `Cubi.Pki.Cms` writes the boot images' CMS signatures with `openssl`, host-only. No `:nerves` dependency, so the shared config skips `nerves_bootstrap` for it, like `cubi_e2e` |
-| `apps/cubi_tools` | The operator's Mix tasks ([docs/specs.md](docs/specs.md) §2.11): `mix cubi.gen_ca`, `mix cubi.ipxe`, `mix cubi.release`, `mix cubi.sign` so far. Host-only, a `runtime: false` dependency of user projects, never in a release; skipped by `nerves_bootstrap` like `cubi_pki` |
-| `apps/cubi_e2e` | The host-only QEMU harness ([docs/testing.md](docs/testing.md) §2). Never a firmware dependency, and it has no `:nerves` dependency, so the shared config skips `nerves_bootstrap` for it. `mix test` runs unit tests; `mix test --only e2e:tier1` boots VMs from the served directory (run `MIX_TARGET=x86_64 MIX_ENV=e2e mix firmware.ipxe` in `apps/cubi_fw` first; `CUBI_E2E_KERNEL` overrides the kernel) |
+| `apps/cubi_tools` | The operator's Mix tasks ([docs/specs.md](docs/specs.md) §2.11): `mix cubi.gen_ca`, `mix cubi.ipxe`, `mix cubi.release`, `mix cubi.sign`, `mix cubi.deploy`. Host-only, a `runtime: false` dependency of user projects, never in a release; skipped by `nerves_bootstrap` like `cubi_pki` |
+| `apps/cubi_e2e` | The host-only QEMU harness ([docs/testing.md](docs/testing.md) §2). Never a firmware dependency, and it has no `:nerves` dependency, so the shared config skips `nerves_bootstrap` for it. `mix test` runs unit tests; `mix test --only e2e:tier1` boots VMs from the served directory (run `MIX_TARGET=x86_64 MIX_ENV=e2e mix firmware.ipxe` in `apps/cubi_fw` first; `CUBI_E2E_KERNEL` overrides the kernel). `fixtures/hello` is a standalone release project the milestone 1 tests build in several versions (`Cubi.E2E.Hello`) |
 
 `examples/` holds standalone Mix projects (own `deps/` and `_build/`, outside the
 umbrella), meant as releases to deploy onto a node ([docs/specs.md](docs/specs.md)

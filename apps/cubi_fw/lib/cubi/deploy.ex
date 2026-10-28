@@ -28,7 +28,10 @@ defmodule Cubi.Deploy do
   for an application that is running again, after an install already rolled
   back, is stale and ignored.
 
-  On a diskless node `/cubi` is a tmpfs mounted here; on a storage node it is
+  **At start**, the recorded `current` is verified again from its directory,
+  signer dates excepted, and started; failing, it falls back like a rollback.
+  On a diskless node `/cubi` is a tmpfs mounted here, empty at every boot, so
+  nothing starts; on a storage node it is
   the pool's (`Cubi.Storage`), with `/cubi/releases` its own dataset.
   """
   use GenServer
@@ -85,7 +88,7 @@ defmodule Cubi.Deploy do
     if state.opts[:wait_storage], do: Cubi.Storage.status()
     if state.opts[:tmpfs], do: ensure_tmpfs(state.opts[:tmpfs], state.opts[:mounts])
     File.mkdir_p!(Store.incoming_dir(state.root))
-    {:noreply, state}
+    {:noreply, boot(state)}
   end
 
   @impl GenServer
@@ -95,7 +98,17 @@ defmodule Cubi.Deploy do
   def handle_call(:state, _from, state), do: {:reply, Store.state(state.root), state}
 
   def handle_call({:install, archive, progress}, _from, state) do
-    {reply, state} = do_install(archive, progress, state)
+    {reply, state} =
+      try do
+        do_install(archive, progress, state)
+      rescue
+        # A bug must not leave the deploy without an answer, nor take the
+        # node's record of what runs with it.
+        e ->
+          Logger.error("deploy: install crashed: " <> Exception.format(:error, e, __STACKTRACE__))
+          {{:error, {:crashed, Exception.message(e)}}, state}
+      end
+
     {:reply, reply, state}
   end
 
@@ -209,10 +222,17 @@ defmodule Cubi.Deploy do
   end
 
   defp rollback(%{current: current} = state, node, cause) do
-    stored = Store.state(state.root)
     Logger.error("deploy: #{current.version} exited (#{inspect(cause)}), rolling back")
     Loader.stop(current.manifest, node.lib)
-    bad = Enum.uniq(stored.bad ++ [current.version])
+    fall_back(state, node, current.version)
+  end
+
+  # `failed` will never run again: mark it bad, and run `previous` in its
+  # place, verified again from disk; if there is none, or it fails too (then
+  # bad as well), nothing runs.
+  defp fall_back(state, node, failed) do
+    stored = Store.state(state.root)
+    bad = Enum.uniq(stored.bad ++ [failed])
 
     {new_current, bad} =
       case stored.previous && start_from_disk(state, stored.previous, node) do
@@ -233,6 +253,28 @@ defmodule Cubi.Deploy do
     Store.put_state!(state.root, %{current: version, previous: nil, bad: bad})
     Store.prune!(state.root, [version])
     %{state | current: new_current}
+  end
+
+  # At boot: `current` again, verified from disk, signer dates excepted
+  # (§2.11.4, §2.11.6). Failing, it is rolled back like any other failure.
+  defp boot(state) do
+    case Store.state(state.root) do
+      %{current: nil} ->
+        state
+
+      %{current: version} ->
+        node = node_info(state.opts)
+
+        case start_from_disk(state, version, node) do
+          {:ok, manifest} ->
+            Logger.info("deploy: started #{manifest["name"]} #{version}")
+            %{state | current: %{manifest: manifest, version: version}}
+
+          {:error, reason} ->
+            Logger.error("deploy: #{version} failed to start at boot: #{inspect(reason)}")
+            fall_back(state, node, version)
+        end
+    end
   end
 
   defp current_name(%{current: nil}), do: nil

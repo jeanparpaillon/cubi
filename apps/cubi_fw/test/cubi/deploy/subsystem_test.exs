@@ -97,6 +97,15 @@ defmodule Cubi.Deploy.SubsystemTest do
     assert Cubi.Deploy.state(ctx.deploy).current == nil
   end
 
+  test "a Cubi.Deploy that is down still gets the client an answer", ctx do
+    :ok = stop_supervised(Cubi.Deploy)
+
+    {lines, status} = deploy(ctx.port, "anything")
+
+    assert status == 1
+    assert ["error {:deploy_down, :exit" <> _] = Enum.take(lines, -1)
+  end
+
   test "more than max_size is refused before anything is installed", ctx do
     {lines, status} = deploy(ctx.port, :crypto.strong_rand_bytes(1_500_000))
 

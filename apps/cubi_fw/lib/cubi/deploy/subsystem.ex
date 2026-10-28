@@ -36,10 +36,17 @@ defmodule Cubi.Deploy.Subsystem do
 
   @impl :ssh_client_channel
   def handle_msg({:ssh_channel_up, id, cm}, state) do
-    dir = Cubi.Deploy.incoming_dir(state.deploy)
-    path = Path.join(dir, "#{System.unique_integer([:positive])}.tar.gz")
-    file = File.open!(path, [:write, :binary, :raw])
-    {:ok, %{state | id: id, cm: cm, file: file, path: path}}
+    state = %{state | id: id, cm: cm}
+
+    try do
+      dir = Cubi.Deploy.incoming_dir(state.deploy)
+      path = Path.join(dir, "#{System.unique_integer([:positive])}.tar.gz")
+      file = File.open!(path, [:write, :binary, :raw])
+      {:ok, %{state | file: file, path: path}}
+    catch
+      # No Cubi.Deploy to take the archive: answer now, read nothing.
+      kind, reason -> finish(state, "error #{inspect({:deploy_down, kind, reason})}", 1)
+    end
   end
 
   def handle_msg({:progress, line}, state) do
@@ -59,6 +66,9 @@ defmodule Cubi.Deploy.Subsystem do
   def handle_msg(_message, state), do: {:ok, state}
 
   @impl :ssh_client_channel
+  def handle_ssh_msg({:ssh_cm, _cm, {:data, _id, 0, _data}}, %{file: nil} = state),
+    do: {:ok, state}
+
   def handle_ssh_msg({:ssh_cm, _cm, {:data, _id, 0, data}}, %{phase: :receiving} = state) do
     size = state.size + byte_size(data)
 
@@ -72,6 +82,8 @@ defmodule Cubi.Deploy.Subsystem do
     end
   end
 
+  def handle_ssh_msg({:ssh_cm, _cm, {:eof, _id}}, %{file: nil} = state), do: {:ok, state}
+
   def handle_ssh_msg({:ssh_cm, _cm, {:eof, _id}}, %{phase: :receiving} = state) do
     File.close(state.file)
     channel = self()
@@ -82,7 +94,12 @@ defmodule Cubi.Deploy.Subsystem do
     _ =
       Task.start(fn ->
         result =
-          Cubi.Deploy.install(deploy, File.read!(path), &send(channel, {:progress, &1}))
+          try do
+            Cubi.Deploy.install(deploy, File.read!(path), &send(channel, {:progress, &1}))
+          catch
+            # Whatever happens, the client gets an answer, never a hang.
+            kind, reason -> {:error, {:deploy_down, kind, reason}}
+          end
 
         send(channel, {:installed, result})
       end)

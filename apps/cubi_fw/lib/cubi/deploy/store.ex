@@ -9,7 +9,13 @@ defmodule Cubi.Deploy.Store do
       incoming/           an archive being received
 
   `state.json` is written to a temporary file and renamed, so a power loss
-  leaves the old state or the new one, never half of either.
+  leaves the old state or the new one, never half of either. Every file is
+  written `O_SYNC`, and `state.json` is fsynced again after the rename. On ZFS
+  that fsync commits the dataset's intent log, the rename included; without
+  it, a write waits for the next transaction group, up to 5 s, and a power cut
+  right after a deploy brought the previous state back (found by a reboot
+  test). No `sync` binary: the image has none. On the diskless tmpfs none of
+  this matters.
   """
 
   @type state :: %{current: String.t() | nil, previous: String.t() | nil, bad: [String.t()]}
@@ -39,8 +45,9 @@ defmodule Cubi.Deploy.Store do
         "bad" => state.bad
       })
 
-    File.write!(path <> ".tmp", json)
+    File.write!(path <> ".tmp", json, [:sync])
     File.rename!(path <> ".tmp", path)
+    fsync!(path)
   end
 
   @spec version_dir(Path.t(), String.t()) :: Path.t()
@@ -62,7 +69,7 @@ defmodule Cubi.Deploy.Store do
     for {path, data} <- entries do
       target = Path.join(tmp, path)
       File.mkdir_p!(Path.dirname(target))
-      File.write!(target, data)
+      File.write!(target, data, [:sync])
     end
 
     File.rm_rf!(dir)
@@ -99,5 +106,12 @@ defmodule Cubi.Deploy.Store do
         do: File.rm_rf!(Path.join(root, name))
 
     :ok
+  end
+
+  # Commits the rename before it on ZFS (see the moduledoc).
+  defp fsync!(path) do
+    {:ok, fd} = :file.open(String.to_charlist(path), [:read, :raw, :binary])
+    :ok = :file.sync(fd)
+    :ok = :file.close(fd)
   end
 end

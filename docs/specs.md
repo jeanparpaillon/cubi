@@ -1029,9 +1029,16 @@ Like `mix upload`, the transport is ssh, and the session's authorized keys are
   any ssh client can drive it.
 - **`mix cubi.deploy <node> [archive]`** streams the newest archive in
   `_build/<env>/cubi/` with the system `ssh -s <node> cubi_deploy`, honouring
-  `--port`, `--user` and `--identity`, prints the node's lines and exits non-zero
-  unless the last one is `ok`. An unsigned archive is refused before it is
-  sent.
+  `--port`, `--user`, `--identity` and `--ssh-option` (repeatable, as `-o`),
+  prints the node's lines as they come and exits non-zero unless ssh exits 0
+  and the last line is `ok`. An unsigned archive is refused before it is sent.
+  The archive is redirected into ssh by `sh -c 'exec ssh … < archive'`: an
+  Erlang port cannot close ssh's stdin, which is how the node learns the
+  archive is complete, without closing its stdout too.
+- **The client always gets an answer.** A crash inside an install is turned
+  into `error {:crashed, …}`, and a `Cubi.Deploy` that is down into
+  `error {:deploy_down, …}`, at connect or during the install: a deploy never
+  hangs.
 - The answer comes **after the settle period** (§2.11.7), so a release that
   crashes a few seconds after starting is reported as a failed deploy, not as
   `ok`.
@@ -1053,6 +1060,11 @@ deploying another version of the same name replaces it.
   version are kept; older ones are deleted after a successful install. A
   version directory keeps the archive's `manifest.json`, `manifest.sig` and
   `signer.pem`, so it can be verified again from disk (`Cubi.Deploy.Store`).
+  Every file is written `O_SYNC` and `state.json` is fsynced again after its
+  rename, which on ZFS commits the intent log, the rename included. Without
+  that, a write waits for the next transaction group (up to 5 s), and a power
+  cut right after a deploy brought the previous state back. The image has no
+  `sync` binary to fall back on.
 - **Load.** For each application dir: `:code.add_patha(ebin)`, then
   `Application.load/1`; then `sys.config` through `Application.put_all_env/1`.
 - **Start.** `Application.ensure_all_started(app, :temporary)` for each entry of
@@ -1073,10 +1085,13 @@ deploying another version of the same name replaces it.
   its directory deleted, and the release that was running is verified again
   from disk (signer dates excepted) and started again. `Cubi.Deploy` runs one
   install at a time.
-- **Boot.** `Cubi.Deploy` starts after shoehorn's `init` list
-  (`config :shoehorn, init: [:nerves_runtime, :nerves_pack, :cubi_fw]`),
-  verifies `current` again and starts it. A `current` that fails verification
-  or start at boot is rolled back like any other failure.
+- **Boot.** `Cubi.Deploy` is a child of `cubi_fw`, which shoehorn starts after
+  its `init` list. It waits for `Cubi.Storage`, mounts the tmpfs on a diskless
+  node, then verifies `current` again from its directory, signer dates
+  excepted, and starts it, in `handle_continue`: a call to `Cubi.Deploy`
+  returns once that is done. A `current` that fails verification or start at
+  boot is rolled back like any other failure: marked bad, `previous` started
+  in its place.
 
 #### 2.11.7 Rollback through shoehorn
 

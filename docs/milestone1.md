@@ -44,11 +44,14 @@ ssh (§2.11.5), loading on the node (§2.11.6) and rollback through shoehorn
       `Cubi.Pki.Archive` in `apps/cubi_pki` holds the archive format for both sides: read (regular files with safe paths only), write, sign, and verify = [§2.11.4](specs.md) steps 1–3, which the node step reuses. Checked on `examples/cubi_hello`.
 - [x] Node: `cubi_deploy` ssh subsystem → verify, check OTP and app conflicts, unpack to `/cubi/releases/<version>/`, then `Cubi.Deploy.install/1`: stop `current`, load and start the new one, wait the settle period, `current` → `previous` ([§2.11.5](specs.md), [§2.11.6](specs.md)). `<pool>/cubi/releases` on storage nodes, a tmpfs on `/cubi` on diskless ones.
       `Cubi.Deploy` (+ `.Store`, `.Check`, `.Loader`, `.Subsystem`) in `apps/cubi_fw`, host-tested with fixture apps compiled and signed in the test and a real `:ssh` daemon; `apps/cubi_e2e/test/milestone1_deploy_node_test.exs` deploys a signed `examples/cubi_hello` to a diskless QEMU node over the subsystem. A failed install already rolls back and marks the version bad; what remains for the rollback step is the shoehorn handler, for failures after the settle period. The subsystem is registered through `config :nerves_ssh, subsystems:`, not at runtime ([§2.11.5](specs.md)).
-- [ ] `mix cubi.deploy <node>`: stream the archive over ssh (`--port`, `--identity`), print the node's verdict, non-zero exit on refusal or rollback.
+- [x] `mix cubi.deploy <node>`: stream the archive over ssh (`--port`, `--identity`), print the node's verdict, non-zero exit on refusal or rollback.
+      `Mix.Tasks.Cubi.Deploy` in `apps/cubi_tools`, with `--user` and `--ssh-option` too; it redirects the archive into the system `ssh` through `sh`, since an Erlang port cannot close ssh's stdin alone ([§2.11.5](specs.md)).
 - [x] `Cubi.Deploy.ShoehornHandler` and the rollback path; `state.json` with `current`, `previous` and `bad` ([§2.11.7](specs.md)).
       `Cubi.Deploy.ShoehornHandler` only casts exits to `Cubi.Deploy` (a raise in a shoehorn handler halts the node); `Cubi.Deploy` rolls back when the exit concerns its release and the release is no longer all running, so a stale exit after a rollback during install is ignored. Host-tested, and on a QEMU node: a deployed `cubi_hello` killed after it settled is rolled back.
-- [ ] Boot: after shoehorn's `init` list, `Cubi.Deploy` re-verifies `current`, signer dates excepted, and starts it.
-- [ ] Harness: ~~`mix cubi.e2e.key` also generates a test CA and signer (gitignored)~~ (done in step 4); fixtures `hello` v1, v2 (good) and v3 (crashes in `start/2`) and v4 (crashes 5 s after start), built by the tests with `mix cubi.release`.
+- [x] Boot: after shoehorn's `init` list, `Cubi.Deploy` re-verifies `current`, signer dates excepted, and starts it.
+      `Cubi.Deploy` starts `current` in `handle_continue`; a failure falls back like a rollback. Writes are `O_SYNC` and `state.json` fsynced after its rename: a reboot test lost the last deploy without it ([§2.11.6](specs.md)).
+- [x] Harness: ~~`mix cubi.e2e.key` also generates a test CA and signer (gitignored)~~ (done in step 4); fixtures `hello` v1, v2 (good) and v3 (crashes in `start/2`) and v4 (crashes 5 s after start), built by the tests with `mix cubi.release`.
+      `apps/cubi_e2e/fixtures/hello`, its version and crash mode from `HELLO_VERSION` and `HELLO_MODE` at build time; `Cubi.E2E.Hello` builds, signs and deploys it with the real tasks. v4 dies 5 s after start, inside the 10 s settle period.
 
 **Acceptance:**
 
@@ -62,6 +65,13 @@ ssh (§2.11.5), loading on the node (§2.11.6) and rollback through shoehorn
 - Deploying v3 (crashes on start) leaves v2 running within 10 s, `mix cubi.deploy` exits non-zero, and re-deploying v3 is refused as bad.
 - v4 (crashes after start) is rolled back to v2 the same way, and the base image's applications never restart.
 - A storage node rebooted after deploying v2 runs v2 again; a diskless node rebooted runs only the base image.
+
+Validated on 2026-10-28. The first point is `apps/cubi_tools/test/mix/tasks/cubi.gen_ca_test.exs`, the second
+`apps/cubi_e2e/test/phase3_firmware_ipxe_test.exs` (signatures checked with `Cubi.Pki.Cms.verify/3`, which runs
+`openssl cms -verify`), the third `milestone1_imgverify_test.exs`, and all the others
+`apps/cubi_e2e/test/milestone1_acceptance_test.exs`, which deploys with `mix cubi.deploy` as a user would. The
+unsigned archive is refused by `mix cubi.deploy` before it is sent; the node's own refusal of one is
+`milestone1_deploy_node_test.exs`.
 
 ---
 

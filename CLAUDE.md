@@ -15,8 +15,9 @@ the root, and the apps live in `apps/`.
 | `apps/kubex_ipxe` | `mix firmware.ipxe` ([docs/specs.md](docs/specs.md) §2.3): runs `mix firmware`, then writes the served directory `_build/<target>_<env>/ipxe/`. A build-time dependency of `kubex_fw`, never in a release |
 | `apps/kubex_e2e` | The host-only QEMU harness ([docs/testing.md](docs/testing.md) §2). Never a firmware dependency, and it has no `:nerves` dependency, so the shared config skips `nerves_bootstrap` for it. `mix test` runs unit tests; `mix test --only e2e:tier1` boots VMs from the served directory (run `MIX_TARGET=x86_64 MIX_ENV=e2e mix firmware.ipxe` in `apps/kubex_fw` first; `KUBEX_E2E_KERNEL` overrides the kernel) |
 
-Run `mix kubex.e2e.key` in `apps/kubex_e2e` before building e2e firmware. The
-key is gitignored. Building the firmware needs the `nerves_bootstrap` archive,
+Run `mix kubex.e2e.key` in `apps/kubex_e2e` before building e2e firmware, and
+`mix kubex.e2e.ipxe` once before the UEFI network-boot tests (it fetches
+Ubuntu's `ipxe.efi`; `KUBEX_E2E_IPXE_EFI` overrides). Both are gitignored. Building the firmware needs the `nerves_bootstrap` archive,
 and host builds of `kubex_fw` (a root `mix test`, for example) need
 `libmnl-dev` for `nerves_uevent`. Build the system with
 `BR2_PRIMARY_SITE=https://sources.buildroot.net` in the environment: some

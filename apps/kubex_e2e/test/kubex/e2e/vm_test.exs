@@ -49,6 +49,7 @@ defmodule Kubex.E2E.VMTest do
     assert {"-netdev", "user,id=n0,hostfwd=tcp:127.0.0.1:2222-:22"} in p
     assert {"-device", "virtio-net-pci,netdev=n0,mac=#{s.mac}"} in p
     refute Enum.any?(argv, &String.contains?(&1, "pflash"))
+    assert {"-fw_cfg", "name=etc/sercon-port,file=/t/dir/sercon-port"} in p
   end
 
   test "UEFI uses the shared OVMF code and a per-VM copy of the vars" do
@@ -82,6 +83,63 @@ defmodule Kubex.E2E.VMTest do
     for initrds <- [["a", "b"], [{"/kubex/token", "t", 0o400}]] do
       argv = VM.argv(VM.normalize(spec(boot: {:direct, "/k", initrds, ""})), @paths)
       assert {"-initrd", "/t/dir/initrd.img"} in pairs(argv)
+    end
+  end
+
+  describe "PXE boot" do
+    @pxe_paths Map.put(@paths, :http_port, 8080)
+
+    defp netdev(argv),
+      do:
+        argv
+        |> pairs()
+        |> Enum.find_value(fn
+          {"-netdev", v} -> v
+          _ -> nil
+        end)
+
+    defp nic(argv),
+      do:
+        argv
+        |> pairs()
+        |> Enum.find_value(fn
+          {"-device", "virtio-net" <> _ = v} -> v
+          _ -> nil
+        end)
+
+    test "BIOS over TFTP: slirp serves the directory, QEMU's iPXE ROM runs boot.ipxe" do
+      argv = VM.argv(VM.normalize(spec(boot: {:pxe, :tftp, "/srv/ipxe"})), @pxe_paths)
+
+      assert netdev(argv) =~ ",tftp=/srv/ipxe,bootfile=boot.ipxe"
+      assert nic(argv) =~ ",bootindex=0"
+      refute "-kernel" in argv
+    end
+
+    test "BIOS over HTTP: the DHCP filename is the boot.ipxe URL" do
+      argv = VM.argv(VM.normalize(spec(boot: {:pxe, :http, "/srv/ipxe"})), @pxe_paths)
+
+      assert netdev(argv) =~ ",bootfile=http://10.0.2.2:8080/boot.ipxe"
+      refute netdev(argv) =~ "tftp="
+    end
+
+    test "UEFI, either protocol: OVMF's PXE loads ipxe.efi from the per-VM TFTP root" do
+      for protocol <- [:tftp, :http] do
+        argv =
+          VM.argv(
+            VM.normalize(spec(firmware: :uefi, boot: {:pxe, protocol, "/srv/ipxe"})),
+            @pxe_paths
+          )
+
+        assert netdev(argv) =~ ",tftp=/t/dir/pxe,bootfile=ipxe.efi"
+        assert nic(argv) =~ ",bootindex=0"
+      end
+    end
+
+    test "direct boot puts no boot options on the NIC" do
+      argv = VM.argv(VM.normalize(spec()), @paths)
+
+      refute netdev(argv) =~ "bootfile"
+      refute nic(argv) =~ "bootindex"
     end
   end
 end

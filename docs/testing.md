@@ -70,8 +70,16 @@ The VM uses QEMU's built-in `-netdev user`:
 - **Phase 1** skips the network entirely: `-kernel` / `-initrd` / `-append`.
 - **Phase 4 over TFTP:** `-netdev user,id=n0,tftp=<ipxe dir>,bootfile=boot.ipxe`,
   using QEMU's iPXE NIC ROM.
-- **Phase 4 over HTTP:** a small Bandit server on host loopback, which the guest
-  reaches as `10.0.2.2`.
+- **Phase 4 over HTTP:** a small Bandit server on host loopback
+  (`Kubex.E2E.HttpServer`), which the guest reaches as `10.0.2.2`; the DHCP
+  filename is the `boot.ipxe` URL. The server logs every request to `http.log`.
+- **UEFI:** OVMF's PXE client can only run an EFI binary, so the VM gets a TFTP
+  root of its own with `ipxe.efi` (`mix kubex.e2e.ipxe`) and an `autoexec.ipxe`
+  that runs `dhcp` and chains `boot.ipxe`, by TFTP or by URL ([phase 4](phase4.md)).
+- **BIOS consoles:** the harness sets SeaBIOS's `etc/sercon-port` fw_cfg item
+  to ttyS0, so SeaBIOS and iPXE's messages reach `console.log` as they do under
+  `-nographic`. The value is a raw little-endian integer, so it is passed as a
+  file.
 - **ssh:** `hostfwd=tcp:127.0.0.1:<free port>-:22`, with the free port
   allocated by the harness.
 
@@ -148,7 +156,7 @@ machine:
   memory: 1024,
   disks: [{:virtio, "KBXD0", :blank}, {:nvme, "KBXN0", :dirty}],
   rtc: :host | {:skew, ~U[2020-01-01 00:00:00Z]},
-  boot: {:direct, kernel, initrds, cmdline} | :pxe
+  boot: {:direct, kernel, initrds, cmdline} | {:pxe, :tftp | :http, served_dir}
 }
 ```
 

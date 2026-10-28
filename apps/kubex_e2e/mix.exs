@@ -27,7 +27,10 @@ defmodule Kubex.E2E.MixProject do
 
   defp deps do
     [
-      {:muontrap, "~> 2.0"}
+      {:muontrap, "~> 2.0"},
+      # The HTTP side of PXE boots (docs/testing.md §4.1).
+      {:bandit, "~> 1.6"},
+      {:plug, "~> 1.16"}
     ]
   end
 end

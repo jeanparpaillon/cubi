@@ -3,3 +3,6 @@
 
 # ExUnit @tag :tmp_dir.
 /tmp/
+
+# ipxe.efi for UEFI PXE boots (`mix kubex.e2e.ipxe`), never committed.
+/priv/ipxe/

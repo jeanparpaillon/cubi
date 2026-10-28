@@ -29,7 +29,16 @@ defmodule Kubex.E2E.VM do
             rtc: :host,
             boot: nil
 
-  @type boot :: {:direct, Path.t(), [Kubex.E2E.Initrd.part()], String.t()} | :pxe
+  @typedoc """
+  `{:direct, kernel, initrds, cmdline}` boots the kernel without firmware
+  involvement. `{:pxe, :tftp | :http, served_dir}` network-boots the
+  directory `mix firmware.ipxe` writes (docs/phase4.md): BIOS through QEMU's
+  iPXE NIC ROM, UEFI through OVMF's PXE, `ipxe.efi` and an `autoexec.ipxe`
+  from a per-VM TFTP root. With `:http`, only that chainload step is TFTP.
+  """
+  @type boot ::
+          {:direct, Path.t(), [Kubex.E2E.Initrd.part()], String.t()}
+          | {:pxe, :tftp | :http, Path.t()}
   @type disk :: {:virtio | :nvme, serial :: String.t(), file :: Path.t()}
   @type t :: %__MODULE__{
           name: String.t(),
@@ -43,9 +52,10 @@ defmodule Kubex.E2E.VM do
         }
 
   @type paths :: %{
-          dir: Path.t(),
-          run_dir: Path.t(),
-          ssh_port: :inet.port_number()
+          required(:dir) => Path.t(),
+          required(:run_dir) => Path.t(),
+          required(:ssh_port) => :inet.port_number(),
+          optional(:http_port) => :inet.port_number()
         }
 
   @ovmf_dir "/usr/share/OVMF"
@@ -87,7 +97,12 @@ defmodule Kubex.E2E.VM do
   def socket(paths, :console), do: Path.join(paths.run_dir, "con.sock")
   def socket(paths, :qmp), do: Path.join(paths.run_dir, "qmp.sock")
 
-  defp firmware_args(:bios, _paths), do: []
+  # SeaBIOS writes to VGA unless told otherwise, and so does iPXE's NIC ROM
+  # under it; -nographic would set this, -display none does not. SeaBIOS
+  # reads the value as a raw little-endian integer, hence a file:
+  # prepare_firmware/2 writes 0x3f8 (ttyS0) into it.
+  defp firmware_args(:bios, paths),
+    do: ["-fw_cfg", "name=etc/sercon-port,file=#{sercon_port(paths)}"]
 
   defp firmware_args(:uefi, paths) do
     ovmf = System.get_env("KUBEX_E2E_OVMF_DIR", @ovmf_dir)
@@ -122,16 +137,43 @@ defmodule Kubex.E2E.VM do
   defp disk_format(file), do: if(Path.extname(file) == ".qcow2", do: "qcow2", else: "raw")
 
   defp net_args(spec, paths) do
-    [
-      ["-netdev", "user,id=n0,hostfwd=tcp:127.0.0.1:#{paths.ssh_port}-:22"],
-      ["-device", "virtio-net-pci,netdev=n0,mac=#{spec.mac}"]
-    ]
+    netdev =
+      Enum.join(
+        ["user,id=n0,hostfwd=tcp:127.0.0.1:#{paths.ssh_port}-:22" | pxe_netdev(spec, paths)],
+        ","
+      )
+
+    device = "virtio-net-pci,netdev=n0,mac=#{spec.mac}"
+
+    device =
+      if match?({:pxe, _, _}, spec.boot), do: device <> ",bootindex=0", else: device
+
+    [["-netdev", netdev], ["-device", device]]
   end
+
+  # BIOS: QEMU's iPXE NIC ROM runs boot.ipxe itself. UEFI: OVMF's PXE client
+  # runs ipxe.efi, which takes autoexec.ipxe from the same TFTP root.
+  defp pxe_netdev(%{firmware: :bios, boot: {:pxe, :tftp, served}}, _paths),
+    do: ["tftp=#{served}", "bootfile=boot.ipxe"]
+
+  defp pxe_netdev(%{firmware: :bios, boot: {:pxe, :http, _served}}, paths),
+    do: ["bootfile=#{boot_url(paths)}"]
+
+  defp pxe_netdev(%{firmware: :uefi, boot: {:pxe, _protocol, _served}}, paths),
+    do: ["tftp=#{pxe_root(paths)}", "bootfile=ipxe.efi"]
+
+  defp pxe_netdev(_spec, _paths), do: []
+
+  defp boot_url(paths), do: "http://10.0.2.2:#{paths.http_port}/boot.ipxe"
+
+  defp pxe_root(paths), do: Path.join(paths.dir, "pxe")
+
+  defp sercon_port(paths), do: Path.join(paths.dir, "sercon-port")
 
   defp boot_args({:direct, kernel, initrds, cmdline}, paths),
     do: ["-kernel", kernel, "-initrd", initrd_path(initrds, paths), "-append", cmdline]
 
-  defp boot_args(:pxe, _paths), do: raise(ArgumentError, "boot: :pxe arrives with phase 4")
+  defp boot_args({:pxe, protocol, _served}, _paths) when protocol in [:tftp, :http], do: []
 
   # QEMU's -initrd takes one file for a Linux kernel (docs/phase0.md), so
   # anything but a single plain file is assembled into the test directory.
@@ -185,6 +227,8 @@ defmodule Kubex.E2E.VM do
     paths = %{dir: dir, run_dir: make_run_dir(), ssh_port: free_port()}
     prepare_firmware(spec.firmware, paths)
     prepare_initrd(spec.boot, paths)
+    {http, paths} = start_http(spec.boot, paths)
+    prepare_pxe(spec, paths)
 
     args = argv(spec, paths)
     File.write!(Path.join(dir, "qemu.argv"), Enum.join(args, "\n") <> "\n")
@@ -203,6 +247,7 @@ defmodule Kubex.E2E.VM do
            spec: spec,
            paths: paths,
            qemu: qemu,
+           http: http,
            console: console,
            qmp: qmp,
            qmp_log: File.open!(Path.join(dir, "qmp.log"), [:append])
@@ -212,6 +257,7 @@ defmodule Kubex.E2E.VM do
     else
       {:error, reason} ->
         GenServer.stop(qemu)
+        stop_http(http)
         File.rm_rf(paths.run_dir)
         {:stop, {:qemu_start_failed, reason, Path.join(dir, "qemu.argv")}}
     end
@@ -234,8 +280,12 @@ defmodule Kubex.E2E.VM do
   def terminate(_reason, state) do
     _ = qmp_command(state, "quit", %{})
     if Process.alive?(state.qemu), do: GenServer.stop(state.qemu)
+    stop_http(state.http)
     File.rm_rf(state.paths.run_dir)
   end
+
+  defp stop_http(nil), do: :ok
+  defp stop_http(pid), do: if(Process.alive?(pid), do: ThousandIsland.stop(pid), else: :ok)
 
   defp make_run_dir() do
     base = System.get_env("XDG_RUNTIME_DIR") || System.tmp_dir!()
@@ -252,14 +302,47 @@ defmodule Kubex.E2E.VM do
     port
   end
 
+  defp start_http({:pxe, :http, served}, paths) do
+    {:ok, pid, port} = Kubex.E2E.HttpServer.start_link(served, Path.join(paths.dir, "http.log"))
+    {pid, Map.put(paths, :http_port, port)}
+  end
+
+  defp start_http(_boot, paths), do: {nil, paths}
+
+  # The UEFI TFTP root: ipxe.efi, an autoexec.ipxe that chains boot.ipxe, and
+  # for :tftp the served files themselves (symlinked).
+  defp prepare_pxe(%{firmware: :uefi, boot: {:pxe, protocol, served}}, paths) do
+    root = pxe_root(paths)
+    File.rm_rf!(root)
+    File.mkdir_p!(root)
+    File.cp!(Kubex.E2E.Ipxe.efi!(), Path.join(root, "ipxe.efi"))
+
+    chain =
+      case protocol do
+        :tftp ->
+          for name <- File.ls!(served),
+              do: File.ln_s!(Path.join(served, name), Path.join(root, name))
+
+          "boot.ipxe"
+
+        :http ->
+          boot_url(paths)
+      end
+
+    # autoexec.ipxe runs before iPXE's own DHCP.
+    File.write!(Path.join(root, "autoexec.ipxe"), "#!ipxe\ndhcp\nchain #{chain}\n")
+  end
+
+  defp prepare_pxe(_spec, _paths), do: :ok
+
   defp prepare_initrd({:direct, _kernel, [path], _cmdline}, _paths) when is_binary(path), do: :ok
 
   defp prepare_initrd({:direct, _kernel, initrds, _cmdline}, paths),
     do: Kubex.E2E.Initrd.assemble!(initrds, initrd_path(initrds, paths))
 
-  defp prepare_initrd(:pxe, _paths), do: :ok
+  defp prepare_initrd({:pxe, _protocol, _served}, _paths), do: :ok
 
-  defp prepare_firmware(:bios, _paths), do: :ok
+  defp prepare_firmware(:bios, paths), do: File.write!(sercon_port(paths), <<0x3F8::little-16>>)
 
   defp prepare_firmware(:uefi, paths) do
     vars = Path.join(paths.dir, "OVMF_VARS_4M.fd")
@@ -268,7 +351,12 @@ defmodule Kubex.E2E.VM do
     if not File.exists?(vars), do: File.cp!(Path.join(ovmf, "OVMF_VARS_4M.fd"), vars)
   end
 
-  defp log_qemu(name, line), do: Logger.warning("qemu[#{name}]: #{String.trim_trailing(line)}")
+  defp log_qemu(name, line) do
+    # etc/sercon-port is the name SeaBIOS reads, so QEMU's advice to use opt/
+    # does not apply (firmware_args/2).
+    if not String.contains?(line, "etc/sercon-port"),
+      do: Logger.warning("qemu[#{name}]: #{String.trim_trailing(line)}")
+  end
 
   ## QMP
 

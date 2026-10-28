@@ -41,6 +41,34 @@ defmodule Kubex.Pki do
 
   @type signer :: %{cert: X509.Certificate.t(), key: X509.PrivateKey.t()}
 
+  @doc """
+  The PKI directory to use: `dir` if given, else `KUBEX_PKI_DIR`, else
+  `~/.kubex/pki`.
+  """
+  @spec dir(Path.t() | nil) :: Path.t()
+  def dir(dir \\ nil) do
+    Path.expand(dir || System.get_env("KUBEX_PKI_DIR") || "~/.kubex/pki")
+  end
+
+  @doc """
+  The SHA-256 fingerprint of the root certificate in `dir`, as colon-separated
+  hex: what an operator compares against an iPXE build's `TRUST=` certificate.
+  """
+  @spec ca_fingerprint(Path.t()) :: String.t()
+  def ca_fingerprint(dir) do
+    dir
+    |> paths()
+    |> Map.fetch!(:ca_cert)
+    |> File.read!()
+    |> X509.Certificate.from_pem!()
+    |> X509.Certificate.to_der()
+    |> then(&:crypto.hash(:sha256, &1))
+    |> Base.encode16()
+    |> String.codepoints()
+    |> Enum.chunk_every(2)
+    |> Enum.map_join(":", &Enum.join/1)
+  end
+
   @doc "The paths of the four files in a PKI directory."
   @spec paths(Path.t()) :: %{atom() => Path.t()}
   def paths(dir) do

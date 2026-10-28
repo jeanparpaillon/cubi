@@ -61,6 +61,17 @@ defmodule Kubex.PkiTest do
     end
   end
 
+  describe "dir/1" do
+    test "an explicit directory wins, then KUBEX_PKI_DIR, then ~/.kubex/pki" do
+      assert Pki.dir("some/where") == Path.expand("some/where")
+
+      case System.get_env("KUBEX_PKI_DIR") do
+        nil -> assert Pki.dir() == Path.expand("~/.kubex/pki")
+        env -> assert Pki.dir() == Path.expand(env)
+      end
+    end
+  end
+
   describe "gen_signer!/2" do
     test "refuses while a signer exists", %{pki: dir} do
       assert_raise RuntimeError, ~r/refusing to overwrite/, fn -> Pki.gen_signer!(dir) end

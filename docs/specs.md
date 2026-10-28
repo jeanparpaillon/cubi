@@ -1,6 +1,6 @@
-# Kubex node boot — specification
+# Cubi node boot — specification
 
-Plan for booting kubex cluster nodes from the network: iPXE fetches a kernel and
+Plan for booting cubi cluster nodes from the network: iPXE fetches a kernel and
 an initramfs over HTTP(S), and the machine comes up straight into BEAM. The OS
 lives in RAM. Anything that must survive a reboot lives on a ZFS pool whose
 disks are named on the kernel cmdline, the way SmartOS does it (§2.10). There is
@@ -25,11 +25,11 @@ A standard Nerves firmware is tied to a block device at every layer:
 | Bootloader | U-Boot / GRUB from disk, A/B slot | iPXE from NIC ROM or chainloaded |
 | Rootfs | squashfs on a partition, mounted read-only | squashfs **inside the initramfs**, loop-mounted |
 | App data (`/root`) | ext4/f2fs partition | tmpfs |
-| Cluster state, PKI | — | Khepri, on a ZFS dataset reserved for kubex, on nodes given disks with `kubex.vdevs=` (§2.10) |
+| Cluster state, PKI | — | Khepri, on a ZFS dataset reserved for cubi, on nodes given disks with `cubi.vdevs=` (§2.10) |
 | Firmware metadata | U-Boot env (`nerves_fw_*` KV) | `Nerves.Runtime.KVBackend.InMemory`, seeded at build time |
 | Update | `fwup` writes the inactive slot | the iPXE server serves a new pair of files; the node reboots. Application releases are deployed on top without a reboot (§2.11) |
 | Rollback / validate | `nerves_fw_validated` + slot switch | no-op locally: the boot server decides which version to serve. A failing application release is rolled back on the node (§2.11.7) |
-| Node identity | serial number from `boardid` | a certificate issued on join: `kubex.join=` on the cmdline plus a per-node token delivered as an initrd file, or created by the first node from `kubex.bootstrap=<OTP>` (§2.8). Storage nodes keep it on their pool across reboots; diskless nodes rejoin on every boot (§2.8.3) |
+| Node identity | serial number from `boardid` | a certificate issued on join: `cubi.join=` on the cmdline plus a per-node token delivered as an initrd file, or created by the first node from `cubi.bootstrap=<OTP>` (§2.8). Storage nodes keep it on their pool across reboots; diskless nodes rejoin on every boot (§2.8.3) |
 
 Erlang distribution, `vintage_net`, `shoehorn` and `nerves_runtime` are unchanged
 once BEAM is running. The changes are all below BEAM and in how firmware
@@ -43,7 +43,7 @@ iPXE is at home on x86 (legacy BIOS `undionly.kpxe` and UEFI `ipxe.efi`), and
 QEMU ships an iPXE NIC ROM, so the whole loop can be tested on a laptop. Fork
 `nerves_system_x86_64` the same way `marmoos_system_rpi3` was forked (see
 `marmoos_os/docs/system.md` §2: kernel options cannot be added out of tree).
-Working name: `kubex_system_x86_64`.
+Working name: `cubi_system_x86_64`.
 
 arm64 UEFI (servers, or an rpi4 running EDK2 firmware) is a later variant. The
 initramfs mechanics are the same; only the system fork differs.
@@ -81,7 +81,7 @@ merges the OTP release into the squashfs and packs it into a `.fw`, which is a
 zip. So the iPXE artifacts are derived from the `.fw`:
 
 ```
-mix firmware  →  kubex.fw (zip)
+mix firmware  →  cubi.fw (zip)
                    └── data/rootfs.img      → rootfs.squashfs
                          └── /boot/bzImage  → vmlinuz
 stage1.cpio.zst  (built once, by the system)
@@ -89,7 +89,7 @@ stage1.cpio.zst  (built once, by the system)
 
 The `.fw` has no kernel resource: GRUB loads `/boot/bzImage` from the rootfs
 partition, so the kernel is only inside the squashfs ([phase 0](phase0.md)). The
-`mix firmware.ipxe` task (umbrella app `kubex_ipxe`, a build-time dependency of
+`mix firmware.ipxe` task (umbrella app `cubi_ipxe`, a build-time dependency of
 the firmware app) runs `mix firmware`, then:
 
 - unzips `data/rootfs.img` and takes the kernel out of it with `unsquashfs
@@ -112,7 +112,7 @@ is only dropped from what is served.
 ### 2.4 Stage-1 init
 
 This is `/init` in a tiny cpio. For now it is a busybox `sh` script,
-`stage1/init` in the system fork, built by Buildroot: `package/kubex-stage1`
+`stage1/init` in the system fork, built by Buildroot: `package/cubi-stage1`
 makes a ~200 KB static busybox with only the applets the script uses, and
 `post-createfs.sh` assembles `images/stage1.cpio.zst` and
 `images/stage1-dev.cpio.zst` (~105 KB each) with the kernel's
@@ -123,8 +123,8 @@ shell that `rdinit=` can reach ([security.md](security.md) §5). Its whole job:
 1. Mount `proc`, `sys`, `devtmpfs`.
 2. `losetup` + mount `/rootfs.squashfs` read-only on `/newroot`.
 3. Mount a tmpfs on `/newroot/root` (`mode=0700,nodev,nosuid`). Persistence is
-   not stage-1's concern: kubex imports its ZFS pool from BEAM (§2.10.3).
-4. Move `/kubex/token`, if present, to `/newroot/root/.kubex/token`, mode
+   not stage-1's concern: cubi imports its ZFS pool from BEAM (§2.10.3).
+4. Move `/cubi/token`, if present, to `/newroot/root/.cubi/token`, mode
    `0400` (§2.8.2).
 5. `mount --move /dev /newroot/dev`. erlinit expects a populated `/dev` and
    only remounts it; without the move it has no console and no `/dev/null`.
@@ -133,14 +133,14 @@ shell that `rdinit=` can reach ([security.md](security.md) §5). Its whole job:
    unknown `key=value` cmdline arguments into init's environment, and
    `ERL_AFLAGS=…` would otherwise reach the BEAM.
 
-The archive also ships `/dev/console` and an empty `/kubex` directory. The
+The archive also ships `/dev/console` and an empty `/cubi` directory. The
 kernel does not create parent directories when it unpacks an initrd, so
-iPXE's `initrd … /kubex/token` needs `/kubex` to exist in an earlier archive.
+iPXE's `initrd … /cubi/token` needs `/cubi` to exist in an earlier archive.
 `gen_init_cpio` writes the device node without root, with owner 0 and mtime 0,
 so the archive is reproducible.
 
 `switch_root` empties the old rootfs, but the loop device keeps the squashfs
-file alive. A failure at any step prints `kubex stage-1: …` on the console.
+file alive. A failure at any step prints `cubi stage-1: …` on the console.
 `prod` builds then reboot after a delay, so iPXE retries; only `dev` builds
 drop to a shell. e2e images use `prod`.
 
@@ -165,12 +165,12 @@ its only module is `efivarfs` ([phase 0](phase0.md) has the table). On top of it
 ### 2.6 `erlinit.config` and runtime configuration
 
 - Drop both `-m` mounts: stage-1 owns `/root`, and there is no boot partition.
-- Replace `-d /usr/bin/boardid` with `/usr/bin/kubex-boardid`, a small script
+- Replace `-d /usr/bin/boardid` with `/usr/bin/cubi-boardid`, a small script
   that prints the SMBIOS UUID, or the first MAC without colons when the UUID is
   blank (all zeros or all `f`). The hostname is that ID as is (`-n %s`), and
   `nerves_runtime`'s `:boardid_path` points at the same script, so
   `serial_number/0` agrees. This gives the hostname and the stable Erlang node
-  name `kubex@<UUID>` that a Khepri member needs (§2.10.2). It is *not* the
+  name `cubi@<UUID>` that a Khepri member needs (§2.10.2). It is *not* the
   cluster identity, which is the certificate assigned on join (§2.8). The MAC
   fallback only sees NICs whose driver is built in: erlinit runs the script
   before anything loads modules.
@@ -197,22 +197,22 @@ cluster that holds a join secret, so it is part of the trust boundary:
 | **Per-node script** | Renders `https://boot.example/node/${uuid}.ipxe` for each machine in its **inventory**, the list of SMBIOS UUIDs it boots |
 | **Token derivation** | Holds the master tokens (§2.8.1) and derives each node's token from them, so a node never receives a master |
 | **Token file** | Serves `node/${uuid}/token` (§2.8.2), only while that node needs one: always for diskless nodes, and until the first successful join for storage nodes |
-| **Bootstrap OTP** | Renders `kubex.bootstrap=` for the first node, exactly once (§2.8.4) |
+| **Bootstrap OTP** | Renders `cubi.bootstrap=` for the first node, exactly once (§2.8.4) |
 
 A joining node's script:
 
 ```ipxe
 #!ipxe
-set base https://boot.example/kubex/${version}
-kernel ${base}/vmlinuz console=ttyS0 kubex.join=${join} kubex.vdevs=${vdevs}
+set base https://boot.example/cubi/${version}
+kernel ${base}/vmlinuz console=ttyS0 cubi.join=${join} cubi.vdevs=${vdevs}
 initrd ${base}/stage1.cpio.zst
 initrd ${base}/rootfs.squashfs /rootfs.squashfs
-initrd https://boot.example/node/${uuid}/token /kubex/token
+initrd https://boot.example/node/${uuid}/token /cubi/token
 boot
 ```
 
 The script leaves out the `initrd …/token` line for a provisioned storage node,
-and `kubex.vdevs=` for a diskless one (§2.10.3).
+and `cubi.vdevs=` for a diskless one (§2.10.3).
 
 The boot server learns which storage nodes are provisioned from the cluster.
 Either it calls `Cluster.status/1`, or the cluster pushes it the provisioned
@@ -235,29 +235,29 @@ A node gets everything it needs to join or create a cluster from three places:
 
 | Source | Carries | Notes |
 | --- | --- | --- |
-| cmdline `kubex.join=<HOST>` | endpoint of an existing cluster: [architecture.md](architecture.md) §2's `bootstrap_endpoint` | not secret, fine to log |
-| initrd file `/kubex/token` | this node's join token, `kbxn_<master id>.<uuid>:<secret>` (§2.8.1) | never on the cmdline (§2.8.2) |
-| cmdline `kubex.bootstrap=<OTP>` | no cluster yet: this node creates one | single-use, spent minutes after boot (§2.8.4) |
+| cmdline `cubi.join=<HOST>` | endpoint of an existing cluster: [architecture.md](architecture.md) §2's `bootstrap_endpoint` | not secret, fine to log |
+| initrd file `/cubi/token` | this node's join token, `kbxn_<master id>.<uuid>:<secret>` (§2.8.1) | never on the cmdline (§2.8.2) |
+| cmdline `cubi.bootstrap=<OTP>` | no cluster yet: this node creates one | single-use, spent minutes after boot (§2.8.4) |
 
-The storage arguments (`kubex.vdevs=` and friends) are in §2.10.3. A storage
+The storage arguments (`cubi.vdevs=` and friends) are in §2.10.3. A storage
 node that has already joined also has its key and certificate on its pool, in
-`/kubex/identity`.
+`/cubi/identity`.
 
 `cluster_boot` picks a mode at start:
 
 | Has | Mode |
 | --- | --- |
 | identity on its pool | **rejoin**: straight to the distribution handshake, no token needed (§2.8.3) |
-| `kubex.join=` + token file | **join** (§2.8.3) |
-| `kubex.bootstrap=`, no `kubex.join=`, an empty pool | **bootstrap** (§2.8.4) |
-| `kubex.bootstrap=` with a store already on the pool | refused: restarts its Khepri member instead (§2.10.3) |
-| `kubex.join=` **and** `kubex.bootstrap=` | refused: logged, then restricted. Guessing here could split a cluster |
+| `cubi.join=` + token file | **join** (§2.8.3) |
+| `cubi.bootstrap=`, no `cubi.join=`, an empty pool | **bootstrap** (§2.8.4) |
+| `cubi.bootstrap=` with a store already on the pool | refused: restarts its Khepri member instead (§2.10.3) |
+| `cubi.join=` **and** `cubi.bootstrap=` | refused: logged, then restricted. Guessing here could split a cluster |
 | none of the above | **restricted**: BEAM runs, the node does nothing cluster-wise. This is what booting by hand in QEMU does, so phases [1](phase1.md)–[6](phase6.md) don't need a cluster |
 
 #### 2.8.1 Tokens: masters, per-node derivation, scopes
 
 **Masters** are created by the bootstrap node, and later by
-`Cluster.mint_token/1`. They are kept in Khepri at `[kubex, tokens, MasterId]`
+`Cluster.mint_token/1`. They are kept in Khepri at `[cubi, tokens, MasterId]`
 (§2.10.1) and in the boot server's config. Nowhere else.
 
 Each master is a `kbx_` key and a secret, in NervesHub's format (§2.9.2), plus a
@@ -274,7 +274,7 @@ scope:
 only the boot server and the cluster can compute one:
 
 ```
-node_secret = HMAC-SHA256(master_secret, "kubex:node-token:v1:" <> uuid)
+node_secret = HMAC-SHA256(master_secret, "cubi:node-token:v1:" <> uuid)
 node_key    = "kbxn_" <> master_id <> "." <> uuid
 ```
 
@@ -302,9 +302,9 @@ The kernel prints its command line to the kernel log at boot
 (`Kernel command line: …`), and Nerves' `RingLogger` captures the kernel log.
 `/proc/cmdline` stays world-readable for as long as the node runs. So the token
 travels the way the squashfs does (§2.2): iPXE wraps the token file into the
-initramfs as `/kubex/token`.
+initramfs as `/cubi/token`.
 
-1. **Stage-1** moves `/kubex/token` to `/newroot/root/.kubex/token` (tmpfs, mode
+1. **Stage-1** moves `/cubi/token` to `/newroot/root/.cubi/token` (tmpfs, mode
    `0400`) before `switch_root` deletes the initramfs.
 2. **`cluster_boot`** reads the file, then deletes it, once the join attempt
    ends either way.
@@ -312,7 +312,7 @@ initramfs as `/kubex/token`.
    is never logged.
 
 For hand-booted QEMU before the boot server exists (phases [1](phase1.md)–[6](phase6.md)),
-`kubex.token=<key>:<secret>` on the cmdline is accepted with a warning. Nothing
+`cubi.token=<key>:<secret>` on the cmdline is accepted with a warning. Nothing
 else uses it.
 
 #### 2.8.3 Join and rejoin
@@ -325,7 +325,7 @@ master's scope, and then issues a certificate whose CN is the node's UUID.
   fresh join with a fresh key, under the same UUID. The join replaces that
   member's certificate and revokes the old one, so no stale member is left
   behind.
-- **Storage node:** the key and certificate are written to `/kubex/identity`.
+- **Storage node:** the key and certificate are written to `/cubi/identity`.
   With that certificate it fetches the cluster's ZFS key and creates its
   encrypted datasets (§2.10.4). After the first join, the boot server stops
   serving it a token (§2.7).
@@ -345,7 +345,7 @@ Either way, a node that never comes back is expired by failure detection
 The first node has nobody to join, so it proves its operator out of band. It
 must be a storage node with an empty pool (§2.10.2).
 
-1. The boot server renders this node's script with `kubex.bootstrap=<OTP>`, once.
+1. The boot server renders this node's script with `cubi.bootstrap=<OTP>`, once.
    The operator who set it up knows the OTP.
 2. The node starts BEAM and a **bootstrap web server**, and prints its address
    and the server's certificate fingerprint on the console. Nothing
@@ -354,23 +354,23 @@ must be a storage node with an empty pool (§2.10.2).
    types the OTP. The node compares it in constant time with the cmdline value.
 4. On a match the node bootstraps:
    - It generates the cluster CA and its own node certificate, written to
-     `/kubex/identity`.
+     `/cubi/identity`.
    - It creates its pool, generates the cluster's ZFS key and creates
-     `<pool>/kubex/crypt` with it (§2.10.4). The page does not show the key: it
+     `<pool>/cubi/crypt` with it (§2.10.4). The page does not show the key: it
      is exported separately, so that it never lands in the boot server's config
      with the masters.
-   - It starts Khepri on `/kubex/khepri` with itself as the only member and
+   - It starts Khepri on `/cubi/khepri` with itself as the only member and
      voter (§2.10), and writes the CA there.
    - It starts TLS distribution.
    - It mints two masters, one per role, each with an expiry, and its own UUID
      on their allowlists.
-5. The page shows the two masters and the `kubex.join=` value, once. **They go
+5. The page shows the two masters and the `cubi.join=` value, once. **They go
    into the boot server's config, not onto any node.** The operator then adds
    the other machines' UUIDs to the boot server's inventory, which syncs them to
    the allowlists.
 6. The bootstrap web server stops, and the OTP is spent. A second correct entry
    is refused. After a reboot, the store on the pool makes the node refuse
-   `kubex.bootstrap=` altogether (§2.10.3). The boot server's render-once rule is
+   `cubi.bootstrap=` altogether (§2.10.3). The boot server's render-once rule is
    a second line of defence.
 
 Rules for the bootstrap web server:
@@ -380,7 +380,7 @@ Rules for the bootstrap web server:
 - **Rate-limit attempts** (for example 5, then exponential back-off). An OTP is
   short enough to type, which also makes it short enough to brute-force.
 - **It never starts in any other mode.** The only way to reach it is
-  `kubex.bootstrap=` on the cmdline, with an empty pool.
+  `cubi.bootstrap=` on the cmdline, with an empty pool.
 
 #### 2.8.5 Audit, and what stays exposed
 
@@ -389,7 +389,7 @@ Rules for the bootstrap web server:
   telemetry (§2.9.2).
 - **The signal that a node token was copied:** a join for a UUID that is already
   `provisioned`, from a different address.
-- **Log `kubex.join=` freely.** Never log a token, an OTP or a master.
+- **Log `cubi.join=` freely.** Never log a token, an OTP or a master.
 - **What remains exposed:**
 
   | Secret | Where it lives | Its limit |
@@ -407,18 +407,18 @@ Both halves are Elixir and Apache-2.0, and both were read:
 - **client:** `nerves_hub_link` 2.12.0 (`marmoos_os/deps/nerves_hub_link`);
 - **server:** `nerves_hub_web` at `4f7df5a` (2026-10-27).
 
-Registration lives in the server, so most of what kubex needs comes from there.
-Copied files keep their SPDX headers, and kubex gets a `NOTICE` naming both
+Registration lives in the server, so most of what cubi needs comes from there.
+Copied files keep their SPDX headers, and cubi gets a `NOTICE` naming both
 projects.
 
 #### 2.9.1 Two ways to use it
 
-- **A. Run a real NervesHub as kubex's registration authority.** Nodes run
-  `nerves_hub_link`, and kubex reads the device list from the NervesHub API.
+- **A. Run a real NervesHub as cubi's registration authority.** Nodes run
+  `nerves_hub_link`, and cubi reads the device list from the NervesHub API.
   That makes an external server a hard dependency of `Cluster.join`, which
   contradicts the self-bootstrapping first node of §2.8.4. Half of what NervesHub
   does, firmware updates, cannot apply anyway, since boot images come from iPXE.
-- **B. Copy both halves into kubex** (recommended). Every member runs the server
+- **B. Copy both halves into cubi** (recommended). Every member runs the server
   half, with Khepri (§2.10) in place of NervesHub's Postgres. Joining nodes run
   the client half.
 
@@ -427,10 +427,10 @@ later for observability.
 
 #### 2.9.2 Server side: copied from `nerves_hub_web`
 
-NervesHub registers a device in two ways, and kubex uses both, one after the
+NervesHub registers a device in two ways, and cubi uses both, one after the
 other:
 
-| Piece | In `nerves_hub_web` | In kubex |
+| Piece | In `nerves_hub_web` | In cubi |
 | --- | --- | --- |
 | **NH1 verification** | `NervesHub.DeviceLink.Authentication.authenticate({:shared_secret, headers})` and `decode_from_headers/1`: rebuilds the salt, then `Plug.Crypto.verify(secret, salt, sig, max_age: 90)` returns the identifier | **Copy**, with one step changed: instead of looking up a stored secret, parse `kbxn_<master id>.<uuid>` from `x-nh-key`, load the master, and derive the node secret (§2.8.1). Then check that the verified identifier equals that UUID. Keep `cache: nil`: without it, Plug.Crypto caches one derived key per salt in ETS and never evicts, and NervesHub measured 41.5 MB after 12 days. Keep the failure flattening to `:invalid_auth` too |
 | **Key/secret format** | `NervesHub.Products.SharedSecretAuth`: key `nhp_` + 43 chars, secret 43 chars, each `strong_rand_bytes(32)` base64 without padding; `deactivated_at` for revocation | **Copy the generator** for masters (`kbx_` prefix), with `deactivated_at` plus the scope fields of §2.8.1. Per-node `kbxn_` tokens are derived, not generated |
@@ -445,12 +445,12 @@ other:
 
 #### 2.9.3 Client side: from `nerves_hub_link`
 
-| Piece | In `nerves_hub_link` | In kubex |
+| Piece | In `nerves_hub_link` | In cubi |
 | --- | --- | --- |
 | **NH1 signing** | `Configurator.SharedSecret.headers/1`: `Plug.Crypto.sign(secret, salt, identifier, signed_at: os_time)` | **Copy.** `key` is the node key and `secret` the node secret. The secret never goes on the wire; only a 90-second HMAC of the UUID does |
 | **Identifier** | `Nerves.Runtime.serial_number/0` | The SMBIOS UUID from §2.6's `boardid`: the NH1 identifier, the UUID in the node key, and the CSR's CN, all three checked equal |
-| **Cert/key → `:ssl` options** | `Configurator.LocalCertKey`: reads `nerves_hub_cert` / `nerves_hub_key` from `Nerves.Runtime.KV` | **Adapt.** The cert and key live in the InMemory KV (`KV.put/2` works on that backend), loaded from `/kubex/identity` on a storage node. The `:ssl` list feeds TLS distribution |
-| **Configurator behaviour** | NervesKey → TPM → SharedSecret | **Copy the shape**: `Kubex.Credentials`, tried in order `PoolIdentity` (rejoin), `TokenFile`, `Cmdline` (QEMU only). TPM and NervesKey drop in later for nodes with a sealed key, which can go straight to the handshake |
+| **Cert/key → `:ssl` options** | `Configurator.LocalCertKey`: reads `nerves_hub_cert` / `nerves_hub_key` from `Nerves.Runtime.KV` | **Adapt.** The cert and key live in the InMemory KV (`KV.put/2` works on that backend), loaded from `/cubi/identity` on a storage node. The `:ssl` list feeds TLS distribution |
+| **Configurator behaviour** | NervesKey → TPM → SharedSecret | **Copy the shape**: `Cubi.Credentials`, tried in order `PoolIdentity` (rejoin), `TokenFile`, `Cmdline` (QEMU only). TPM and NervesKey drop in later for nodes with a sealed key, which can go straight to the handshake |
 | Socket, extensions, remote IEx, `UpdateManager` / `fwup` | | **Not applicable**: peers talk over distribution, and updates are iPXE-side |
 
 Copy the code rather than depending on either project: the client drags in
@@ -479,11 +479,11 @@ sequenceDiagram
     B->>K: Transaction: scope check (role, expiry, max_joins, allowlist), upsert member, revoke previous cert, audit
     K-->>B: Committed (status: registered)
     B-->>N: Certificate signed by cluster CA, CA chain, cluster config
-    N->>N: KV.put cert/key (+ /kubex/identity on storage), build :ssl opts
+    N->>N: KV.put cert/key (+ /cubi/identity on storage), build :ssl opts
     opt storage node
         N->>B: GET /zfs-key over mTLS with the new certificate (§2.10.4)
         B-->>N: ZFS key, if the cert is the one pinned for a storage member
-        N->>N: create <pool>/kubex/crypt with it, mount khepri and log
+        N->>N: create <pool>/cubi/crypt with it, mount khepri and log
     end
     N->>K: TLS distribution handshake
     K->>K: verify_fun = SSL.decide/2: path-valid, CN known, pin cert
@@ -501,7 +501,7 @@ A few points:
   `nerves_time` to sync, or trusts the RTC if the boot script says so. A wrong
   clock fails with a console message, not a silent retry loop.
 - **`verify_fun` in TLS distribution** goes in the `-ssl_dist_optfile` as a
-  fun, `{verify_fun, {fun 'Elixir.Kubex.SSL':verify/3, State}}`. OTP 29
+  fun, `{verify_fun, {fun 'Elixir.Cubi.SSL':verify/3, State}}`. OTP 29
   evaluates that file with `erl_eval` and hands it to `ssl` unchanged, so the
   `{Module, Function, State}` form is rejected there, and distribution then
   just fails to connect (`pang`) with nothing logged. That form is only parsed
@@ -515,7 +515,7 @@ A few points:
 This is the SmartOS model. The OS is a RAM image thrown away at every boot,
 loaded from the network or a USB key. Everything that must survive lives on a
 ZFS pool built from local disks. SmartOS calls its pool `zones` and keeps even
-its own configuration there (`zones/usbkey`). In kubex:
+its own configuration there (`zones/usbkey`). In cubi:
 
 - **the OS** is the iPXE image (§2.2);
 - **the state** is a pool whose disks are named on the cmdline;
@@ -532,15 +532,15 @@ consensus-backed membership: there is no separate Raft to build.
 Everything §2.9 called "membership" is a path in one store:
 
 ```
-[kubex, members, Id]                         status (registered | provisioned | removed), voter?, addresses
-[kubex, members, Id, certs, Fingerprint]     pinned cert: der, serial, aki, ski, validity   (decide/2)
-[kubex, pki, ca]                             CA certificate + key (key at rest: §2.10.4)
-[kubex, pki, crl]
-[kubex, tokens, MasterId]                    master secret, scope (role, expires_at, max_joins, allowed_ids), join count, deactivated_at
-[kubex, joins, Seq]                          audit: node key, uuid, source address, result   (§2.8.5)
-[kubex, zfs_key]                             SHA-256 of the ZFS key, created_at, exported_at; never the key   (§2.10.4)
-[kubex, key_fetches, Seq]                    audit: uuid, cert fingerprint, source address, result   (§2.10.4)
-[kubex, config]                              cluster config returned by a join
+[cubi, members, Id]                         status (registered | provisioned | removed), voter?, addresses
+[cubi, members, Id, certs, Fingerprint]     pinned cert: der, serial, aki, ski, validity   (decide/2)
+[cubi, pki, ca]                             CA certificate + key (key at rest: §2.10.4)
+[cubi, pki, crl]
+[cubi, tokens, MasterId]                    master secret, scope (role, expires_at, max_joins, allowed_ids), join count, deactivated_at
+[cubi, joins, Seq]                          audit: node key, uuid, source address, result   (§2.8.5)
+[cubi, zfs_key]                             SHA-256 of the ZFS key, created_at, exported_at; never the key   (§2.10.4)
+[cubi, key_fetches, Seq]                    audit: uuid, cert fingerprint, source address, result   (§2.10.4)
+[cubi, config]                              cluster config returned by a join
 ```
 
 How the copied NervesHub code (§2.9.2) maps onto it:
@@ -575,8 +575,8 @@ kinds of node:
 
 | Node | Has | Khepri |
 | --- | --- | --- |
-| **storage** | `kubex.vdevs=` (§2.10.3) | runs a member and may be a voter. Its Erlang node name is stable: `kubex@<SMBIOS UUID>`, from §2.6's `boardid` |
-| **diskless** | nothing | runs no member. It reads and writes the store through a kubex API over distribution, served by a storage node. Its identity is fresh on every boot (§2.8) |
+| **storage** | `cubi.vdevs=` (§2.10.3) | runs a member and may be a voter. Its Erlang node name is stable: `cubi@<SMBIOS UUID>`, from §2.6's `boardid` |
+| **diskless** | nothing | runs no member. It reads and writes the store through a cubi API over distribution, served by a storage node. Its identity is fresh on every boot (§2.8) |
 
 Consequences:
 
@@ -591,9 +591,9 @@ Consequences:
 
 | Argument | Meaning |
 | --- | --- |
-| `kubex.vdevs=<SPEC>` | physical devices, in `zpool create` vdev syntax with commas for spaces, e.g. `mirror,nvme-SAMSUNG_…_S4EWNX0R,nvme-SAMSUNG_…_S4EWNX0T`. Absent = diskless node |
-| `kubex.zpool=<NAME>` | pool name, default `kubex` |
-| `kubex.zfs.create=1` | allows creating the pool if none is found |
+| `cubi.vdevs=<SPEC>` | physical devices, in `zpool create` vdev syntax with commas for spaces, e.g. `mirror,nvme-SAMSUNG_…_S4EWNX0R,nvme-SAMSUNG_…_S4EWNX0T`. Absent = diskless node |
+| `cubi.zpool=<NAME>` | pool name, default `cubi` |
+| `cubi.zfs.create=1` | allows creating the pool if none is found |
 
 `cluster_boot` handles the pool from BEAM, before Khepri starts. Doing it there
 rather than in stage-1 keeps the ZFS modules and tools in the squashfs. The
@@ -605,7 +605,7 @@ steps:
    while a pool moved to other hardware still needs a deliberate `-f`. A pool
    that was cleanly exported imports anywhere. A hostid of 0 is refused like
    any foreign one. All of this was checked on OpenZFS 2.3.9 ([phase 0](phase0.md)).
-   `H` is the first 32 bits of `SHA-256("kubex-hostid:" <> machine ID)`, 1 if
+   `H` is the first 32 bits of `SHA-256("cubi-hostid:" <> machine ID)`, 1 if
    that is 0. If `spl` is already loaded (a BEAM restart), its `spl_hostid`
    must be `H`, or setup refuses.
 2. **Import.** `zpool import -N -o cachefile=none -d /dev <name>`:
@@ -613,7 +613,7 @@ steps:
    - `cachefile=none` because there is nowhere to keep one;
    - devices are found by scanning. Pool labels carry GUIDs, so device names
      don't matter for an import.
-3. **Not found.** Create the pool only if `kubex.zfs.create=1` **and** every
+3. **Not found.** Create the pool only if `cubi.zfs.create=1` **and** every
    listed device has no partition table or filesystem signature (`wipefs -n`).
    Never use `-f`. Anything else refuses, with a console message, and the node
    drops to restricted mode. A typo in a boot argument must never wipe a disk.
@@ -622,13 +622,13 @@ steps:
    looking further. The pool is created with `-o cachefile=none -O
    mountpoint=none`, since its root dataset has nowhere to mount on the
    read-only rootfs.
-4. **Imported, but with different vdevs than `kubex.vdevs`** (the pool was grown
+4. **Imported, but with different vdevs than `cubi.vdevs`** (the pool was grown
    or repaired by hand): log it, continue.
-5. **Reserved dataset `<pool>/kubex`.**
+5. **Reserved dataset `<pool>/cubi`.**
    - `refreservation=` (e.g. 4G) is space no other dataset can take, so
      workloads can never fill the cluster's own state. This is the SmartOS-style
      reserved volume.
-   - `mountpoint=legacy`, mounted by kubex on `/kubex`, an empty directory
+   - `mountpoint=legacy`, mounted by cubi on `/cubi`, an empty directory
      shipped in the rootfs overlay.
    - `compression=lz4`, `atime=off`, and `sync=standard`. Ra fsyncs its WAL,
      so `sync=disabled` is never allowed.
@@ -636,29 +636,29 @@ steps:
 
      | Dataset | Mounted on | Holds |
      | --- | --- | --- |
-     | `<pool>/kubex/identity` | `/kubex/identity` | node key and certificate, CA chain, peer addresses. **In clear**: it is what fetches the key |
-     | `<pool>/kubex/crypt` | — | encryption root, no data (§2.10.4) |
-     | `<pool>/kubex/crypt/khepri` | `/kubex/khepri` | Ra's data directory: `khepri:start("/kubex/khepri")` |
-     | `<pool>/kubex/crypt/log` | `/kubex/log` | logs and crash dumps, which can hold the key |
-     | `<pool>/kubex/releases` | `/kubex/releases` | deployed application releases (§2.11.6). **In clear**: signed, and checked at every boot |
+     | `<pool>/cubi/identity` | `/cubi/identity` | node key and certificate, CA chain, peer addresses. **In clear**: it is what fetches the key |
+     | `<pool>/cubi/crypt` | — | encryption root, no data (§2.10.4) |
+     | `<pool>/cubi/crypt/khepri` | `/cubi/khepri` | Ra's data directory: `khepri:start("/cubi/khepri")` |
+     | `<pool>/cubi/crypt/log` | `/cubi/log` | logs and crash dumps, which can hold the key |
+     | `<pool>/cubi/releases` | `/cubi/releases` | deployed application releases (§2.11.6). **In clear**: signed, and checked at every boot |
 
      `crypt` and its children exist only once there is a key: they are created
      at bootstrap or at a storage node's first join (§2.10.4). Before that, and
      in restricted mode, logs stay in RAM. For hand-booted QEMU with no cluster
-     ([phase 6](phase6.md)), `kubex.zfs.testkey=<hex>` on the cmdline keys
-     `crypt`, with a warning, like `kubex.token=` (§2.8.2). `crypt` then
-     carries the user property `kubex:testkey=on`, and bootstrap and join
+     ([phase 6](phase6.md)), `cubi.zfs.testkey=<hex>` on the cmdline keys
+     `crypt`, with a warning, like `cubi.token=` (§2.8.2). `crypt` then
+     carries the user property `cubi:testkey=on`, and bootstrap and join
      refuse a pool that has it. With a key, an existing `crypt` is unlocked
      (`zfs load-key`) and a missing one created; without one, an existing
      `crypt` stays locked. `crypt` itself is `canmount=off`.
 6. **The rest of the pool** is left to workloads, later.
 
-On a graceful leave or shutdown ([architecture.md](architecture.md) §3), kubex stops Khepri, then runs
+On a graceful leave or shutdown ([architecture.md](architecture.md) §3), cubi stops Khepri, then runs
 `zpool export`.
 
 **Device names.** Nerves runs no udev, so `/dev/disk/by-id/` does not exist
-(checked in [phase 0](phase0.md)). `kubex.vdevs=` therefore takes by-id-*style*
-names, and kubex resolves them itself from sysfs to `/dev/nvme0n1` and the like.
+(checked in [phase 0](phase0.md)). `cubi.vdevs=` therefore takes by-id-*style*
+names, and cubi resolves them itself from sysfs to `/dev/nvme0n1` and the like.
 The sysfs sources:
 `/sys/block/nvme*/device/{model,serial}` and `wwid` for NVMe,
 `/sys/block/vd*/serial` for virtio-blk, and `/sys/block/sd*/device/{model,wwid}`
@@ -677,15 +677,15 @@ from sysfs. The parse refuses rather than guesses, so a typo cannot reach
 - a kernel name (`vda`, `/dev/nvme0n1`), which is not stable across boots;
 - a name no disk has, or one that two disks answer to;
 - the same device twice, an empty name, a vdev keyword with nothing after it;
-- any of the three arguments given twice, `kubex.zfs.create=` other than `0`
+- any of the three arguments given twice, `cubi.zfs.create=` other than `0`
   or `1`, and a pool name `zpool` would reject.
 
 What the pool gives the boot flow:
 
-- **Rejoin without a token** (§2.8.3): `/kubex/identity` holds the key and
+- **Rejoin without a token** (§2.8.3): `/cubi/identity` holds the key and
   certificate, so the boot server stops serving the node a token (§2.7).
-- **A local bootstrap guard** (§2.8.4): if `/kubex/khepri` already holds a store,
-  `kubex.bootstrap=` is refused and the node restarts its member instead. A
+- **A local bootstrap guard** (§2.8.4): if `/cubi/khepri` already holds a store,
+  `cubi.bootstrap=` is refused and the node restarts its member instead. A
   rebooted bootstrap node therefore can't create a second cluster.
 - **A whole-cluster restart is recovery, not re-bootstrap.** Storage nodes
   import their pools, and Ra elects a leader once a majority is back. If every
@@ -695,7 +695,7 @@ What the pool gives the boot flow:
 #### 2.10.4 Secrets at rest
 
 The CA key and the token secrets sit on disk, on every voter. ZFS native
-encryption closes that: `<pool>/kubex/crypt` is an encryption root
+encryption closes that: `<pool>/cubi/crypt` is an encryption root
 (`encryption=aes-256-gcm`, `keyformat=hex`, `keylocation=prompt`) holding
 `khepri` and `log` (§2.10.3). Its key is **one key for the whole cluster**,
 kept on no disk. A storage node fetches it over HTTPS from the first node,
@@ -706,19 +706,19 @@ disaster recovery.
 
 | Place | When |
 | --- | --- |
-| RAM of every unlocked storage node | from its `zfs load-key` until shutdown, held by one process (`Kubex.ZfsKey`), redacted in `format_status/1`, never logged |
+| RAM of every unlocked storage node | from its `zfs load-key` until shutdown, held by one process (`Cubi.ZfsKey`), redacted in `format_status/1`, never logged |
 | the operator's offline copy | after `Cluster.export_zfs_key/0` |
-| nowhere else | not in Khepri, which it encrypts, nor the boot server, nor `/kubex/identity` |
+| nowhere else | not in Khepri, which it encrypts, nor the boot server, nor `/cubi/identity` |
 
 **Lifecycle:**
 
 1. **Created at bootstrap** (§2.8.4): `:crypto.strong_rand_bytes(32)`, then the
    encryption root is created with it. Khepri records only
-   `[kubex, zfs_key]`: its SHA-256, `created_at`, `exported_at`.
+   `[cubi, zfs_key]`: its SHA-256, `created_at`, `exported_at`.
 2. **Fetched at join** (§2.8.3): once issuance has returned a certificate, a
    new storage node fetches the key and creates its encryption root with it.
 3. **Fetched at every boot** of a storage node: import, mount
-   `<pool>/kubex/identity`, fetch, `zfs load-key -L prompt`, mount the
+   `<pool>/cubi/identity`, fetch, `zfs load-key -L prompt`, mount the
    children, start Khepri. The key reaches `zfs` on a stdin pipe and never
    touches a file.
 4. **Exported** with `Cluster.export_zfs_key/0` while the cluster runs, from
@@ -735,7 +735,7 @@ asks for a client certificate without requiring one (`verify: :verify_peer`,
 
 - the certificate is path-valid against the cluster CA and not in the CRL;
 - its fingerprint is the one pinned for its CN in
-  `[kubex, members, Id, certs, …]`. Issuance pins one certificate per UUID and
+  `[cubi, members, Id, certs, …]`. Issuance pins one certificate per UUID and
   revokes the previous one (§2.8.3), so each node has a unique client
   certificate, and that certificate is the credential;
 - the member is a storage node, `registered` or `provisioned`, not `removed`.
@@ -747,9 +747,9 @@ distribution is the signal that a disk and its identity were copied.
 
 **The client side** runs in BEAM, over `:ssl` with the identity's key and
 certificate, and verifies the server against the cluster CA, never a system
-store. It tries the `kubex.join=` host, the first node, then the peer
-addresses that the cluster keeps in `/kubex/identity/peers`, in turn. This is
-what makes the first node's own reboot work: it has no `kubex.join=`, and gets
+store. It tries the `cubi.join=` host, the first node, then the peer
+addresses that the cluster keeps in `/cubi/identity/peers`, in turn. This is
+what makes the first node's own reboot work: it has no `cubi.join=`, and gets
 the key from a peer. `keylocation=https://…` was the other option. It would fix
 one URL into a dataset property, configure client certificates through
 environment variables, and report failures as an exit code.
@@ -774,16 +774,16 @@ the identity.
 - **A disk plugged back in somewhere that reaches the cluster** gets the key
   with the identity stored in clear on it, until that member is removed. The
   forced removal (§2.8.3) revokes its certificate, and from then on its disks
-  are dead. Sealing the identity key in a TPM (the `Kubex.Credentials` slot of
+  are dead. Sealing the identity key in a TPM (the `Cubi.Credentials` slot of
   §2.9.3) closes this.
 - **Rotation** is `Cluster.rotate_zfs_key/0`: a new key, `zfs change-key` on
   every storage node (it rewraps the dataset keys, nothing is re-encrypted),
   and a new export. Older exports stop working.
 
-**With the export, the pool opens without kubex.** On any Linux with OpenZFS:
+**With the export, the pool opens without cubi.** On any Linux with OpenZFS:
 `zpool import -N <pool>`, then
-`zfs load-key -L prompt <pool>/kubex/crypt`. Raw sends (`zfs send -w`) of
-`<pool>/kubex/crypt/khepri` stay encrypted off-cluster, and the same export
+`zfs load-key -L prompt <pool>/cubi/crypt`. Raw sends (`zfs send -w`) of
+`<pool>/cubi/crypt/khepri` stay encrypted off-cluster, and the same export
 opens them.
 
 #### 2.10.5 System fork additions
@@ -812,7 +812,7 @@ opens them.
 - **Storage drivers** (`nvme`, `ahci`, `sd_mod`, `virtio_blk`, `virtio_scsi`)
   as modules, loaded before the import.
 - **Licensing.** Shipping the CDDL ZFS module next to a GPL kernel in one image
-  is the position Ubuntu takes, and it is still debated. Distributing kubex
+  is the position Ubuntu takes, and it is still debated. Distributing cubi
   images needs that decision taken deliberately.
 
 ### 2.11 Releases on a running node
@@ -825,18 +825,18 @@ its own, over ssh, and trusts whatever is signed by the operator's CA.
 
 It mimics Nerves firmware signing and `mix upload`:
 
-| Nerves | kubex |
+| Nerves | cubi |
 | --- | --- |
-| `mix firmware.gen.key` → `fwup-key.{pub,priv}` (ed25519) | `mix kubex.gen_ca` → root CA and a signer certificate issued by it (§2.11.1) |
-| public keys passed to `fwup --public-key` on the device | the CA certificate in the rootfs, `/etc/kubex/ca.pem` (§2.11.2) |
-| `mix firmware.sign` → signature added inside the `.fw` | `mix kubex.sign` → signature added inside the release archive (§2.11.4) |
-| `mix upload <host>` → `ssh_subsystem_fwup` | `mix kubex.deploy <node>` → the `kubex_deploy` ssh subsystem (§2.11.5) |
+| `mix firmware.gen.key` → `fwup-key.{pub,priv}` (ed25519) | `mix cubi.gen_ca` → root CA and a signer certificate issued by it (§2.11.1) |
+| public keys passed to `fwup --public-key` on the device | the CA certificate in the rootfs, `/etc/cubi/ca.pem` (§2.11.2) |
+| `mix firmware.sign` → signature added inside the `.fw` | `mix cubi.sign` → signature added inside the release archive (§2.11.4) |
+| `mix upload <host>` → `ssh_subsystem_fwup` | `mix cubi.deploy <node>` → the `cubi_deploy` ssh subsystem (§2.11.5) |
 | `Nerves.Runtime.validate_firmware/0`, else revert to the other slot | a settle period, then a shoehorn handler that reverts to the previous release (§2.11.7) |
 
 #### 2.11.1 PKI: a root CA and a signer
 
-`mix kubex.gen_ca` writes four files into `~/.kubex/pki/` (`--dir` or
-`KUBEX_PKI_DIR` overrides it; the directory is created `0700`):
+`mix cubi.gen_ca` writes four files into `~/.cubi/pki/` (`--dir` or
+`CUBI_PKI_DIR` overrides it; the directory is created `0700`):
 
 | File | What |
 | --- | --- |
@@ -854,7 +854,7 @@ It mimics Nerves firmware signing and `mix upload`:
 - Keys are written unencrypted, mode `0600`. Both are **offline** keys, held by
   the operator ([security.md](security.md) §2): they never reach the boot
   server or a node. The root is only needed again to issue a signer.
-- Built with the `x509` package (§2.9.3), in `apps/kubex_pki`, which runs on the
+- Built with the `x509` package (§2.9.3), in `apps/cubi_pki`, which runs on the
   host and on the node.
 
 There is no revocation in milestone 1. Rotating the signer does not invalidate
@@ -863,12 +863,12 @@ what the old one signed; rotating the root does, at the cost of new images.
 #### 2.11.2 Signed boot images
 
 - **The CA is in the image.** `mix firmware.ipxe` adds the root certificate to
-  the served rootfs as `/etc/kubex/ca.pem`, the way it adds
+  the served rootfs as `/etc/cubi/ca.pem`, the way it adds
   `/etc/firmware.kv` (§2.3). Never the signer, never a key. The rootfs
   signature therefore covers the CA the node will trust for releases. The
-  certificate is `config :kubex_fw, :ca_cert`, else the signer's own
+  certificate is `config :cubi_fw, :ca_cert`, else the signer's own
   `ca.pem`; with both, they must be the same certificate. `config/target.exs`
-  sets it to the operator's `~/.kubex/pki/ca.pem` (or `KUBEX_PKI_DIR`'s) when
+  sets it to the operator's `~/.cubi/pki/ca.pem` (or `CUBI_PKI_DIR`'s) when
   there is one, and to the test CA for `MIX_ENV=e2e`. With none, the build
   warns: the node will refuse every release.
 - **`mix firmware.ipxe --signer <dir>`** writes a detached CMS signature next to
@@ -876,7 +876,7 @@ what the old one signed; rotating the root does, at the cost of new images.
   with `openssl cms -sign -binary -noattr -outform DER`, signer certificate
   included. That is the format `imgverify` reads. They are listed in
   `SHA256SUMS`. `:public_key` cannot write CMS, so this adds `openssl` to the
-  build host's prerequisites. `--signer` defaults to `config :kubex_fw,
+  build host's prerequisites. `--signer` defaults to `config :cubi_fw,
   :signer`, which only `MIX_ENV=e2e` sets. Without a signer, `MIX_ENV=dev`
   builds an unsigned directory with a warning and every other environment
   refuses.
@@ -897,26 +897,26 @@ what the old one signed; rotating the root does, at the cost of new images.
 
   A failed `imgverify` stops the script before `boot`. A production boot
   server renders its own per-node scripts (§2.7) with the same lines.
-- **`mix kubex.ipxe`** (in `apps/kubex_tools`) builds that iPXE: the v2.0.0
-  release tarball, pinned by SHA-512 and cached in `~/.cache/kubex/`, built
+- **`mix cubi.ipxe`** (in `apps/cubi_tools`) builds that iPXE: the v2.0.0
+  release tarball, pinned by SHA-512 and cached in `~/.cache/cubi/`, built
   with `TRUST=<ca.pem>` and `IMAGE_TRUST_CMD`, into `undionly.kpxe` (BIOS
   chainload), `ipxe.efi` (UEFI chainload) and `1af41000.rom` (QEMU's
   virtio-net option ROM, for the harness). iPXE 2.0.0 verifies RSA and ECDSA
   (P-256, P-384) and requires `codeSigning` on the signer. `TRUST=` is its
   only root for HTTPS too, so an HTTPS boot server ([phase 5](phase5.md))
   needs a certificate from the same root, or a second `TRUST=` entry.
-- e2e images are signed with a test CA that `mix kubex.e2e.key` creates next to
-  the harness key, in `apps/kubex_e2e/priv/pki/` ([testing.md](testing.md)).
+- e2e images are signed with a test CA that `mix cubi.e2e.key` creates next to
+  the harness key, in `apps/cubi_e2e/priv/pki/` ([testing.md](testing.md)).
 
 #### 2.11.3 What a release is
 
-A kubex release holds only what the base image lacks. Its applications are
+A cubi release holds only what the base image lacks. Its applications are
 loaded into the node's own BEAM, next to the base image's (§2.11.6), not run as
 a second BEAM: that is what lets shoehorn watch them, and it saves a second
 ERTS in RAM.
 
-`mix kubex.release --base <ipxe dir>`, run in the user's Mix project, builds a
-`mix release` and packs `_build/<env>/kubex/<name>-<version>.tar.gz`:
+`mix cubi.release --base <ipxe dir>`, run in the user's Mix project, builds a
+`mix release` and packs `_build/<env>/cubi/<name>-<version>.tar.gz`:
 
 ```
 manifest.json
@@ -929,7 +929,7 @@ releases/<version>/sys.config     build-time configuration
   `base.json`: the OTP release, the ERTS version and every application with its
   version in the image. `mix firmware.ipxe` writes that file. The host's OTP
   major must be the image's. Each application of the `mix release` is then
-  sorted (`Kubex.Tools.Release.plan/3`), and every problem is reported at once:
+  sorted (`Cubi.Tools.Release.plan/3`), and every problem is reported at once:
 
   | Application | Becomes |
   | --- | --- |
@@ -944,7 +944,7 @@ releases/<version>/sys.config     build-time configuration
   (`eex`, for a Plug app) are shipped.
 - **Same target as the image.** Pure Erlang and Elixir code builds anywhere;
   NIFs need the project built with the image's `MIX_TARGET` and system, as
-  `kubex_fw` is.
+  `cubi_fw` is.
 - **Configuration is build-time only, and only the shipped applications'.**
   `sys.config` is applied with `Application.put_all_env/1` before the
   applications start, so configuration for one of the image's applications
@@ -971,7 +971,7 @@ releases/<version>/sys.config     build-time configuration
 
 #### 2.11.4 Signature
 
-`mix kubex.sign <archive> [--signer <dir>]` signs the exact bytes of
+`mix cubi.sign <archive> [--signer <dir>]` signs the exact bytes of
 `manifest.json` with `signer.key` (RSA, SHA-256, `:public_key.sign/3`) and adds
 two members to the archive in place, the way `mix firmware.sign` rewrites the
 `.fw`: `manifest.sig` (the raw signature) and `signer.pem`. Signing an archive
@@ -982,7 +982,7 @@ are signed as they are: there is no canonical JSON to agree on.
 
 The node verifies with `:public_key` only, no OpenSSL, in this order:
 
-1. `signer.pem` is path-valid against `/etc/kubex/ca.pem`
+1. `signer.pem` is path-valid against `/etc/cubi/ca.pem`
    (`:public_key.pkix_path_validation/3`), with `codeSigning` in its extended
    key usage.
 2. `manifest.sig` verifies over `manifest.json` with the signer's key.
@@ -1006,16 +1006,16 @@ Like `mix upload`, the transport is ssh, and the session's authorized keys are
 `nerves_ssh`'s. Erlang distribution stays off. The ssh session decides who may
 *send* a release; only the signature decides whether it is installed.
 
-- **On the node,** `kubex_deploy` is an ssh subsystem registered with
+- **On the node,** `cubi_deploy` is an ssh subsystem registered with
   `nerves_ssh` (`subsystems:`), the way `ssh_subsystem_fwup` is. It reads the
   archive from the channel up to EOF, at most 256 MB (it lands in RAM on a
-  diskless node), into `/kubex/releases/incoming/`, then verifies (§2.11.4),
-  unpacks to `/kubex/releases/<version>/` and installs (§2.11.6).
-- **It answers with lines,** `kubex_deploy: <step>` for progress and one final
+  diskless node), into `/cubi/releases/incoming/`, then verifies (§2.11.4),
+  unpacks to `/cubi/releases/<version>/` and installs (§2.11.6).
+- **It answers with lines,** `cubi_deploy: <step>` for progress and one final
   `ok <name> <version>` or `error <reason>`, plus the channel's exit status, so
   any ssh client can drive it.
-- **`mix kubex.deploy <node> [archive]`** streams the newest archive in
-  `_build/<env>/kubex/` with the system `ssh -s <node> kubex_deploy`, honouring
+- **`mix cubi.deploy <node> [archive]`** streams the newest archive in
+  `_build/<env>/cubi/` with the system `ssh -s <node> cubi_deploy`, honouring
   `--port`, `--user` and `--identity`, prints the node's lines and exits non-zero
   unless the last one is `ok`. An unsigned archive is refused before it is
   sent.
@@ -1028,13 +1028,13 @@ Like `mix upload`, the transport is ssh, and the session's authorized keys are
 **One release per node** in milestone 1. A second release name is refused;
 deploying another version of the same name replaces it.
 
-- **Where.** `/kubex/releases/`. On a storage node that is the dataset
-  `<pool>/kubex/releases` (§2.10.3), in clear: integrity comes from the
+- **Where.** `/cubi/releases/`. On a storage node that is the dataset
+  `<pool>/cubi/releases` (§2.10.3), in clear: integrity comes from the
   signature, checked again at every boot. A release must therefore not carry
   secrets in `sys.config`. On a diskless node it is a tmpfs mounted on
-  `/kubex`, so a reboot drops every deployed release and the node runs the base
+  `/cubi`, so a reboot drops every deployed release and the node runs the base
   image alone.
-- **State** is `/kubex/releases/state.json`: `current`, `previous` (versions or
+- **State** is `/cubi/releases/state.json`: `current`, `previous` (versions or
   `null`) and `bad` (a list of versions), written to a temporary file and
   renamed. Only the directories of `current`, `previous` and an incoming
   version are kept; older ones are deleted after a successful install.
@@ -1052,8 +1052,8 @@ deploying another version of the same name replaces it.
   release are never loaded at once.
 - **Install** = verify, stop `current`, load and start the new version, wait the
   settle period, then `previous` ← `current` ← new version.
-- **Boot.** `Kubex.Deploy` starts after shoehorn's `init` list
-  (`config :shoehorn, init: [:nerves_runtime, :nerves_pack, :kubex_fw]`),
+- **Boot.** `Cubi.Deploy` starts after shoehorn's `init` list
+  (`config :shoehorn, init: [:nerves_runtime, :nerves_pack, :cubi_fw]`),
   verifies `current` again and starts it. A `current` that fails verification
   or start at boot is rolled back like any other failure.
 
@@ -1061,18 +1061,18 @@ deploying another version of the same name replaces it.
 
 shoehorn installs a `logger` filter that turns every "application exited"
 report into a call to its handler, for applications started at any time, not
-only at boot **(verify)**. kubex sets `config :shoehorn, handler:
-Kubex.Deploy.ShoehornHandler`:
+only at boot **(verify)**. cubi sets `config :shoehorn, handler:
+Cubi.Deploy.ShoehornHandler`:
 
 - It returns `{:continue, state}` for every application. A dead base image
-  application is left to shoehorn's usual behaviour, never a halt from kubex.
+  application is left to shoehorn's usual behaviour, never a halt from cubi.
 - For an application of `current` that exited with any reason other than
-  `:stopped`, it casts `{:failed, app, reason}` to `Kubex.Deploy` and returns
+  `:stopped`, it casts `{:failed, app, reason}` to `Cubi.Deploy` and returns
   at once. It never stops or starts anything itself: it runs inside shoehorn's
-  report handler. Exits caused by `Kubex.Deploy`'s own stop are `:stopped` and
+  report handler. Exits caused by `Cubi.Deploy`'s own stop are `:stopped` and
   ignored.
 
-`Kubex.Deploy` then **rolls back**: it stops `current` (§2.11.6), adds its
+`Cubi.Deploy` then **rolls back**: it stops `current` (§2.11.6), adds its
 version to `bad`, and starts `previous`, which becomes `current`, with
 `previous` left `null`. With no `previous`, it only stops the release. A
 version in `bad` is never started again: not at boot, and not when the same
@@ -1099,5 +1099,5 @@ One file per phase. Phases run in order; each ends with its acceptance, automate
 | [5](phase5.md) | hardened boot chain |
 | [6](phase6.md) | storage |
 | [M1](milestone1.md) | signed releases on standalone nodes, no distribution (§2.11) |
-| [7](phase7.md) | plug into kubex |
+| [7](phase7.md) | plug into cubi |
 | [8](phase8.md) | real hardware |

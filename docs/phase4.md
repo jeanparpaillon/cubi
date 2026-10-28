@@ -1,6 +1,6 @@
 # Phase 4 — network boot in QEMU
 
-Part of the kubex node boot plan: design in [specs.md](specs.md), open questions in [questions.md](questions.md), tests in [testing.md](testing.md).
+Part of the cubi node boot plan: design in [specs.md](specs.md), open questions in [questions.md](questions.md), tests in [testing.md](testing.md).
 
 - [x] `-netdev user,id=n0,tftp=…,bootfile=boot.ipxe` for the simplest loop, then over HTTP.
       Done by hand on 2026-10-28 with QEMU 10.2's BIOS iPXE ROM (1.21.1+git-20250829), no disk, from the directory
@@ -43,8 +43,8 @@ Part of the kubex node boot plan: design in [specs.md](specs.md), open questions
       the chainload step is TFTP, as [§2.7](specs.md) wants; the HTTP server's log shows `boot.ipxe` and the three
       images.
 - [x] Harness: `firmware: :uefi` with a per-VM OVMF vars copy; `:pxe` boot over user-mode TFTP and HTTP ([testing.md](testing.md) §4.1, §5).
-      `boot: {:pxe, :tftp | :http, served_dir}` in `Kubex.E2E.VM`, `Kubex.E2E.HttpServer` (Bandit), and
-      `mix kubex.e2e.ipxe` for `ipxe.efi`. Tested by `apps/kubex_e2e/test/phase4_netboot_test.exs`.
+      `boot: {:pxe, :tftp | :http, served_dir}` in `Cubi.E2E.VM`, `Cubi.E2E.HttpServer` (Bandit), and
+      `mix cubi.e2e.ipxe` for `ipxe.efi`. Tested by `apps/cubi_e2e/test/phase4_netboot_test.exs`.
 
 **Acceptance:** a cold QEMU VM with no disk boots to IEx, for both BIOS and UEFI.
 

@@ -1,4 +1,4 @@
-# Kubex node boot — test infrastructure
+# Cubi node boot — test infrastructure
 
 Every acceptance bullet in the phase files is an automated test that boots real
 images in QEMU with KVM. The same tests run on a workstation and in CI. Design
@@ -19,20 +19,20 @@ Nothing here is built yet. Points marked **(verify)** are checked in
 Unit tests come first wherever they can: an e2e test proves the parts are wired
 together, not that every branch is right.
 
-## 2. The harness: `kubex_e2e`
+## 2. The harness: `cubi_e2e`
 
-This is a host-only app in the kubex umbrella (`apps/kubex_e2e`), never a dependency of the firmware. It drives QEMU
+This is a host-only app in the cubi umbrella (`apps/cubi_e2e`), never a dependency of the firmware. It drives QEMU
 from ExUnit. It is not part of any firmware.
 
 | Module | Job |
 | --- | --- |
-| `Kubex.E2E.VM` | Builds the QEMU argv from a spec (§5) and starts it under `MuonTrap`. Exposes QMP over a unix socket (`-qmp unix:…,server=on,wait=off`) for reset, power, link and block control |
-| `Kubex.E2E.Console` | The serial console (`-chardev socket,…` + `-serial chardev:…`), copied to a log file. Expect-style matching: `await(vm, ~r/Kernel command line/, 30_000)` |
-| `Kubex.E2E.Node` | Runs Elixir on the guest over `nerves_ssh` exec with the harness key (§3). `eval(vm, "Nerves.Runtime.firmware_valid?()")` returns a term, sent back through `:erlang.term_to_binary/1` + Base64, so it isn't scraped from IEx output |
-| `Kubex.E2E.Sandbox` | Tier 2's network namespace: bridge, taps, dnsmasq, boot server, NTP, packet capture (§4.2) |
-| `Kubex.E2E.Disk` | qcow2 fixtures: blank, pre-partitioned ("dirty"), and pools carried over between boots (§5). `restart_vm!/2` in the case template power-cycles a machine onto the same disks |
-| `Kubex.E2E.Cluster` | N-VM fixture with helpers: `bootstrap/2` (drives the OTP page), `boot_storage/2`, `boot_diskless/2`, `restart_all/1`, `voters/1` |
-| `Kubex.E2E.Leak` | Scans every serial log, the packet capture and each guest's `/root` for every secret the test minted: masters, node tokens, OTPs and the ZFS key ([specs §2.8.5](specs.md), [§2.10.4](specs.md)). For the ZFS key it also scans the raw disk images |
+| `Cubi.E2E.VM` | Builds the QEMU argv from a spec (§5) and starts it under `MuonTrap`. Exposes QMP over a unix socket (`-qmp unix:…,server=on,wait=off`) for reset, power, link and block control |
+| `Cubi.E2E.Console` | The serial console (`-chardev socket,…` + `-serial chardev:…`), copied to a log file. Expect-style matching: `await(vm, ~r/Kernel command line/, 30_000)` |
+| `Cubi.E2E.Node` | Runs Elixir on the guest over `nerves_ssh` exec with the harness key (§3). `eval(vm, "Nerves.Runtime.firmware_valid?()")` returns a term, sent back through `:erlang.term_to_binary/1` + Base64, so it isn't scraped from IEx output |
+| `Cubi.E2E.Sandbox` | Tier 2's network namespace: bridge, taps, dnsmasq, boot server, NTP, packet capture (§4.2) |
+| `Cubi.E2E.Disk` | qcow2 fixtures: blank, pre-partitioned ("dirty"), and pools carried over between boots (§5). `restart_vm!/2` in the case template power-cycles a machine onto the same disks |
+| `Cubi.E2E.Cluster` | N-VM fixture with helpers: `bootstrap/2` (drives the OTP page), `boot_storage/2`, `boot_diskless/2`, `restart_all/1`, `voters/1` |
+| `Cubi.E2E.Leak` | Scans every serial log, the packet capture and each guest's `/root` for every secret the test minted: masters, node tokens, OTPs and the ZFS key ([specs §2.8.5](specs.md), [§2.10.4](specs.md)). For the ZFS key it also scans the raw disk images |
 
 Each test gets its own directory under `_build/e2e/<module>/<test>/`, holding
 disks, logs (`console.log`, `qmp.log`), the QEMU argv and the capture. It is
@@ -43,21 +43,21 @@ too, so they go in a short private directory, `$XDG_RUNTIME_DIR/kbx-<random>/`
 (mode 0700), removed when the VM stops. QEMU starts paused (`-S`) and is
 resumed over QMP once the console is attached, because a `wait=off` chardev
 drops whatever the guest prints before a client connects. With
-`KUBEX_E2E_KEEP=1`, the VMs are left running too, and
-`mix kubex.e2e.console <test> <vm>` attaches to one.
+`CUBI_E2E_KEEP=1`, the VMs are left running too, and
+`mix cubi.e2e.console <test> <vm>` attaches to one.
 
 ## 3. Test firmware: `MIX_ENV=e2e`
 
 The tests boot the same image as production, with exactly three differences:
 
-- **`nerves_ssh` with the harness's public key**, for `Kubex.E2E.Node`. In
+- **`nerves_ssh` with the harness's public key**, for `Cubi.E2E.Node`. In
   production, ssh is either off or uses operator keys.
 - **NTP pointed at the sandbox** (§4.2), since the sandbox has no internet.
 - **Signed with a test CA, not the production one.** A production iPXE
   (`TRUST=` + `imgverify`, [specs §2.7](specs.md)) refuses an e2e image, so a
   test build can never be booted by mistake on a real boot server.
 
-There are no test-only code paths in kubex itself: no `kubex.test=1` flag, and
+There are no test-only code paths in cubi itself: no `cubi.test=1` flag, and
 no backdoor in `cluster_boot`. What the tests check is what ships.
 
 ## 4. Networking
@@ -71,10 +71,10 @@ The VM uses QEMU's built-in `-netdev user`:
 - **Phase 4 over TFTP:** `-netdev user,id=n0,tftp=<ipxe dir>,bootfile=boot.ipxe`,
   using QEMU's iPXE NIC ROM.
 - **Phase 4 over HTTP:** a small Bandit server on host loopback
-  (`Kubex.E2E.HttpServer`), which the guest reaches as `10.0.2.2`; the DHCP
+  (`Cubi.E2E.HttpServer`), which the guest reaches as `10.0.2.2`; the DHCP
   filename is the `boot.ipxe` URL. The server logs every request to `http.log`.
 - **UEFI:** OVMF's PXE client can only run an EFI binary, so the VM gets a TFTP
-  root of its own with `ipxe.efi` (`mix kubex.e2e.ipxe`) and an `autoexec.ipxe`
+  root of its own with `ipxe.efi` (`mix cubi.e2e.ipxe`) and an `autoexec.ipxe`
   that runs `dhcp` and chains `boot.ipxe`, by TFTP or by URL ([phase 4](phase4.md)).
 - **BIOS consoles:** the harness sets SeaBIOS's `etc/sercon-port` fw_cfg item
   to ttyS0, so SeaBIOS and iPXE's messages reach `console.log` as they do under
@@ -148,7 +148,7 @@ A VM spec describes one machine. It is deterministic, so a reboot is the same
 machine:
 
 ```elixir
-%Kubex.E2E.VM{
+%Cubi.E2E.VM{
   name: "s1",
   uuid: "6f1c…",              # -uuid and SMBIOS type 1: boardid, node name, token derivation
   mac: "52:54:00:99:00:01",   # derived from the index
@@ -173,9 +173,9 @@ qemu-system-x86_64 -machine q35,accel=kvm -cpu host -m 1024 -nographic \
 ```
 
 - **Disk serials are set explicitly** (`serial=`), so the sysfs resolution of
-  `kubex.vdevs=` ([specs §2.10.3](specs.md)) is tested against known names, on
+  `cubi.vdevs=` ([specs §2.10.3](specs.md)) is tested against known names, on
   both virtio-blk and NVMe.
-- **Disk kinds:** `:blank` is an empty 8G sparse qcow2 (`<pool>/kubex`
+- **Disk kinds:** `:blank` is an empty 8G sparse qcow2 (`<pool>/cubi`
   reserves 4G), `:dirty` the same with a GPT written by `sfdisk`, and a path is
   an image the test made itself. A stale ZFS label needs no fixture: a pool
   left on kept disks is one (`phase6_storage_test.exs` asks for another pool
@@ -192,10 +192,10 @@ qemu-system-x86_64 -machine q35,accel=kvm -cpu host -m 1024 -nographic \
 | --- | --- |
 | reboot | QMP `system_reset` |
 | crash | QMP `quit`, or `SIGKILL` to QEMU |
-| graceful shutdown | `Nerves.Runtime.poweroff/0` over `Kubex.E2E.Node`. QMP `system_powerdown` does nothing: the kernel registers the ACPI power button, but nothing in erlinit or Nerves listens for it ([phase 0](phase0.md)). If kubex starts handling `KEY_POWER` itself, so that storage nodes export their pool when a hypervisor or a finger asks, this row switches to QMP |
+| graceful shutdown | `Nerves.Runtime.poweroff/0` over `Cubi.E2E.Node`. QMP `system_powerdown` does nothing: the kernel registers the ACPI power button, but nothing in erlinit or Nerves listens for it ([phase 0](phase0.md)). If cubi starts handling `KEY_POWER` itself, so that storage nodes export their pool when a hypervisor or a finger asks, this row switches to QMP |
 | network partition | QMP `set_link n0 off`; `tc netem` on the VM's tap for latency or loss |
 | freeze (GC pause, overloaded host) | QMP `stop`, then `cont` |
-| whole-cluster restart | `Kubex.E2E.Cluster.restart_all/1`: kill every VM, keep their disks |
+| whole-cluster restart | `Cubi.E2E.Cluster.restart_all/1`: kill every VM, keep their disks |
 | disk loss | QMP `blockdev-del`, or a restart with a new blank disk |
 | wrong clock | `rtc: {:skew, …}` with the sandbox NTP stopped. The NH1 join must fail with a console message ([specs §2.9.4](specs.md)) |
 | tampered or wrong artifacts | the boot server's misbehave modes (§4.2) |
@@ -204,13 +204,13 @@ qemu-system-x86_64 -machine q35,accel=kvm -cpu host -m 1024 -nographic \
 
 | Phase | Test file | Tier | Main fixtures |
 | --- | --- | --- | --- |
-| [1](phase1.md) | `apps/kubex_e2e/test/phase1_direct_boot_test.exs` | 1 | `boot: {:direct, …}`; asserts `firmware_valid?`, read-only `/` |
+| [1](phase1.md) | `apps/cubi_e2e/test/phase1_direct_boot_test.exs` | 1 | `boot: {:direct, …}`; asserts `firmware_valid?`, read-only `/` |
 | [2](phase2.md) | `phase2_system_fork_test.exs` | 1 | the same test, against artifacts from the fork |
 | [3](phase3.md) | `phase3_firmware_ipxe_test.exs` | unit + 1 | the output directory's contents, then a boot from it |
 | [4](phase4.md) | `phase4_netboot_test.exs` | 1 | TFTP and HTTP × BIOS and UEFI, no disk |
 | [5](phase5.md) | `phase5_boot_chain_test.exs` | 2 | tampered squashfs refused; script per UUID; proxy-DHCP next to plain DHCP |
-| [6](phase6.md) | `phase6_storage_test.exs` | 1 | blank mirror created; reboot keeps Khepri data; dirty disk and missing `kubex.zfs.create=1` refused |
-| [7](phase7.md) | `phase7_cluster_test.exs` | 2 | bootstrap through the web page; 3 storage + 1 diskless; each refusal case; A's token presented as B; `/zfs-key` refusals; `Kubex.E2E.Leak` over everything; first node restarted alone; whole-cluster restart through the unlock page; exported key opens a disk image outside kubex |
+| [6](phase6.md) | `phase6_storage_test.exs` | 1 | blank mirror created; reboot keeps Khepri data; dirty disk and missing `cubi.zfs.create=1` refused |
+| [7](phase7.md) | `phase7_cluster_test.exs` | 2 | bootstrap through the web page; 3 storage + 1 diskless; each refusal case; A's token presented as B; `/zfs-key` refusals; `Cubi.E2E.Leak` over everything; first node restarted alone; whole-cluster restart through the unlock page; exported key opens a disk image outside cubi |
 
 A failing acceptance bullet names its test, and the test names the bullet in
 its `@moduledoc`.

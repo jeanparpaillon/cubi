@@ -1,4 +1,4 @@
-defmodule Kubex.MixProject do
+defmodule Cubi.MixProject do
   use Mix.Project
 
   def project do

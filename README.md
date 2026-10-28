@@ -1,40 +1,14 @@
-# kubex
+<img src="docs/logo.svg" alt="Cubi logo" width="120">
 
-**Do you really need Kubernetes for your BEAM apps?**
+## Where do you pour your elixir ? In a *Cubi, pardi !*
 
-kubex runs Elixir and Erlang applications on a cluster without Kubernetes. You
-boot your nodes, they join a cluster, and your app runs on them. Each node is
-Linux plus BEAM. Nothing else runs on it.
+cubi runs your elixir app as close as possible to the bare metal.
+
+Boot a bare metal server, a VM, an EC2 instance with a secure, read-only OS and deploy your elixir application on top of it.
+
+A linux kernel, a BEAM, and that's all !
 
 To upgrade a node, reboot it.
-
-> **Status: phase 3 of 8.** A node image builds and boots to IEx in QEMU, from
-> a directory iPXE can serve ([Quickstart](#quickstart)). Clustering (join,
-> membership, storage) is not built yet. The design is in
-> [docs/specs.md](docs/specs.md), and the work plan is the set of phases
-> [below](#roadmap).
-
----
-
-## Why
-
-A Kubernetes control plane needs about 2 GB of RAM for its core services before
-your application starts. Most of what it gives you, the BEAM already has:
-
-| Kubernetes | What the BEAM already gives you |
-| --- | --- |
-| Deployment, ReplicaSet, restart policies | Supervisors, `gen_server`, OTP applications |
-| CoreDNS, Services, service discovery | Erlang distribution, `Registry`, `:global`, `:pg` |
-| Ingress controllers, Traefik, Gateway API, EndpointSlices | Plug (and Bandit or Cowboy) in your release |
-| etcd | [Khepri](https://github.com/rabbitmq/khepri), Raft through Ra, inside the BEAM |
-| Container images | An OTP release, built with `mix firmware` |
-| `kubeadm join` / `kubeadm leave` | `kubex.join=` on the kernel cmdline, plus a graceful leave protocol |
-| Node OS upgrades, image rollouts | The boot server serves a new image, and the node reboots |
-
-On a Kubernetes cluster, each layer of that stack is a separate project that you
-deploy, configure and upgrade. In kubex the BEAM does that work, and kubex adds
-what it is missing: a way to boot a node, admit it into the cluster securely,
-and keep an agreed list of members.
 
 ## How it works
 
@@ -42,9 +16,8 @@ and keep an agreed list of members.
 flowchart LR
     boot["<b>Boot</b><br/>iPXE fetches kernel +<br/>initramfs over HTTPS"]
     beam["<b>BEAM</b><br/>the OS lives in RAM,<br/>BEAM starts as init"]
-    join["<b>Join</b><br/>token → certificate →<br/>TLS distribution"]
     run["<b>Run</b><br/>your OTP release,<br/>supervised"]
-    boot --> beam --> join --> run
+    boot --> beam --> run
     run -. "upgrade = reboot" .-> boot
 ```
 
@@ -59,64 +32,22 @@ The image is built from a [Nerves](https://nerves-project.org/) system for
 x86_64. `mix firmware.ipxe` converts the usual `.fw` into the three files that
 the boot server serves: `vmlinuz`, `stage1.cpio.zst` and `rootfs.squashfs`.
 
-### Join: membership is explicit
-
-When BEAM starts on a node, the node is not yet a member of the cluster. A node
-joins in explicit steps:
-
-1. The boot server gives the node the address of the cluster (`kubex.join=`) and
-   a join token for that node only. The token is delivered as an initrd file,
-   never on the kernel cmdline.
-2. The cluster checks the token and issues the node a certificate.
-3. The node connects to its peers over Erlang distribution with mutual TLS. Each
-   peer checks the certificate during the handshake.
-4. The cluster's Khepri store records the node as a member.
-
-The first node creates the cluster from a single-use bootstrap secret
-(`kubex.bootstrap=`). A node can leave gracefully (it stops taking new work,
-hands its work off, and then the membership change is committed), or an operator
-can remove it by force by revoking its certificate.
-
-### State: Khepri on ZFS, only where there are disks
-
-There are two kinds of node:
-
-| Node | Disks | Role |
-| --- | --- | --- |
-| **storage** | named on the cmdline with `kubex.vdevs=` | holds a ZFS pool, runs a Khepri member, can vote in Raft, and keeps its identity across reboots |
-| **diskless** | none | runs workloads, reaches the store through a storage node, and rejoins with a fresh identity on every boot |
-
-Cluster state (members, certificates, the CA, join tokens and config) is stored
-in Khepri, on a ZFS dataset reserved for kubex. Raft needs durable storage, so
-only storage nodes vote. To survive the loss of one node, a cluster needs three
-storage nodes.
-
 ### Deploy and upgrade: reboot
 
-Your application ships in the image. To deploy a new version, you build the
-image, publish it on the boot server, and reboot the nodes. The boot server
-chooses which version each node boots, so promoting a version, testing it on a
-few nodes first and rolling it back are all done on the boot server. Nodes have
-no A/B partitions and no package manager.
-
-Your application can also be deployed onto a running node, without a reboot.
-You sign the release with your own CA (`mix kubex.release`, `mix kubex.sign`) and
-send it over ssh (`mix kubex.deploy <node>`). The node checks the signature
+Your application is deployed onto a running node, without a reboot.
+You sign the release with your own CA (`mix cubi.release`, `mix cubi.sign`) and
+send it over ssh (`mix cubi.deploy <node>`). The node checks the signature
 against the CA built into its image, starts the release, and goes back to the
 previous one if it crashes ([docs/specs.md](docs/specs.md) §2.11).
 
 ## Is it for you?
 
-kubex is a good fit when:
+cubi is a good fit when:
 
 - your workloads are BEAM releases, such as Elixir, Erlang or Gleam apps;
 - you run on machines you control (bare metal, or VMs that can boot over the
   network);
 - you prefer a few things you understand well to a large platform.
-
-It is not a good fit when you need to run containers for other languages, mix
-workloads from several teams with resource quotas, or use the Kubernetes
-ecosystem: Helm, operators, managed cloud integrations.
 
 ## Quickstart
 
@@ -128,7 +59,7 @@ ecosystem: Helm, operators, managed cloud integrations.
   sign images;
 - QEMU for x86_64 with its iPXE NIC ROMs (`qemu-system-x86`, `ipxe-qemu` on
   Debian/Ubuntu), and read-write access to `/dev/kvm`;
-- `libmnl-dev`, only for host builds of `kubex_fw` (a root `mix test`).
+- `libmnl-dev`, only for host builds of `cubi_fw` (a root `mix test`).
 
 The Nerves system is a git submodule:
 
@@ -142,7 +73,7 @@ git submodule update --init
 directory a boot server serves:
 
 ```sh
-cd apps/kubex_fw
+cd apps/cubi_fw
 export MIX_TARGET=x86_64
 export BR2_PRIMARY_SITE=https://sources.buildroot.net
 mix deps.get
@@ -170,8 +101,8 @@ The output lands in `_build/<target>_<env>/ipxe/` at the repository root, so
 `--cmdline "console=ttyS0 …"` sets the kernel arguments written into
 `boot.ipxe` (default `console=ttyS0`).
 
-`--signer DIR` signs the images with the signer from `mix kubex.gen_ca`
-(in `apps/kubex_tools`; `~/.kubex/pki` by default). A `dev` build may be
+`--signer DIR` signs the images with the signer from `mix cubi.gen_ca`
+(in `apps/cubi_tools`; `~/.cubi/pki` by default). A `dev` build may be
 unsigned; other environments refuse to build without a signer. The image
 trusts your root CA for deployed releases ([docs/specs.md](docs/specs.md)
 §2.11.2).
@@ -180,7 +111,7 @@ Which ssh keys the image trusts depends on `MIX_ENV`:
 
 - **`dev`** (default) trusts your `~/.ssh/id_{rsa,ecdsa,ed25519}.pub`;
 - **`e2e`** trusts only the test harness key, and is signed by a test CA.
-  Create both once with `mix kubex.e2e.key` in `apps/kubex_e2e`, then build with
+  Create both once with `mix cubi.e2e.key` in `apps/cubi_e2e`, then build with
   `MIX_ENV=e2e mix firmware.ipxe`. The output is in `_build/x86_64_e2e/ipxe/`.
 
 ### Boot it in QEMU
@@ -214,7 +145,7 @@ which runs Elixir rather than a shell:
 ```sh
 ssh -p 2222 localhost 'Nerves.Runtime.firmware_validation_status()'
 # e2e image:
-ssh -p 2222 -i apps/kubex_e2e/priv/harness_key/id_ed25519 localhost '…'
+ssh -p 2222 -i apps/cubi_e2e/priv/harness_key/id_ed25519 localhost '…'
 ```
 
 These commands boot under BIOS (SeaBIOS). UEFI netboot (OVMF with
@@ -226,7 +157,7 @@ The automated tests boot the `e2e` image in QEMU, so build it first (see
 [above](#build-an-ipxe-directory)), then:
 
 ```sh
-cd apps/kubex_e2e
+cd apps/cubi_e2e
 mix test                    # unit tests
 mix test --only e2e:tier1   # boots VMs from _build/x86_64_e2e/ipxe/
 ```
@@ -250,7 +181,7 @@ Each phase ends with an acceptance test, automated as described in
 | [5](docs/phase5.md) | Hardened boot chain |
 | [6](docs/phase6.md) | Storage: ZFS and Khepri |
 | [M1](docs/milestone1.md) | Signed releases deployed to standalone nodes, no distribution |
-| [7](docs/phase7.md) | Plug into kubex: join, leave, membership |
+| [7](docs/phase7.md) | Plug into cubi: join, leave, membership |
 | [8](docs/phase8.md) | Real hardware |
 
 ## Documentation

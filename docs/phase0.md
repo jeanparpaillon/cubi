@@ -1,6 +1,6 @@
 # Phase 0 — confirm the assumptions (half a day)
 
-Part of the kubex node boot plan: design in [specs.md](specs.md), open questions in [questions.md](questions.md), tests in [testing.md](testing.md).
+Part of the cubi node boot plan: design in [specs.md](specs.md), open questions in [questions.md](questions.md), tests in [testing.md](testing.md).
 
 - [x] `unzip -l` a stock `nerves_system_x86_64` `.fw`: rootfs and kernel resource paths.
 - [x] Check the stock x86_64 kernel config for every symbol in [§2.5](specs.md).
@@ -10,7 +10,7 @@ Part of the kubex node boot plan: design in [specs.md](specs.md), open questions
 - [x] `/dev/disk/by-id` absent under Nerves; `spl_hostid` keeps imports `-f`-free across reboots ([§2.10.3](specs.md)).
 - [ ] Test infrastructure ([testing.md](testing.md) §4.2, §6, §8): AppArmor profile for unprivileged user namespaces, KVM inside the namespace, ACPI power button handling in Nerves, `/dev/kvm` on CI runners.
 - [x] Khepri 0.19 projections, and `verify_fun` as `{M, F, State}` in the `inet_tls_dist` options file ([§2.9.4](specs.md)).
-- [ ] iPXE `imgverify` with a `TRUST=` build accepts an RSA-3072 signer with `codeSigning`, and which key types it accepts besides RSA ([§2.11.1](specs.md)). From the v2.0.0 source: RSA and ECDSA P-256/P-384, `codeSigning` required (`crypto/cms.c`). The RSA-3072 boot is `apps/kubex_e2e/test/milestone1_imgverify_test.exs`.
+- [ ] iPXE `imgverify` with a `TRUST=` build accepts an RSA-3072 signer with `codeSigning`, and which key types it accepts besides RSA ([§2.11.1](specs.md)). From the v2.0.0 source: RSA and ECDSA P-256/P-384, `codeSigning` required (`crypto/cms.c`). The RSA-3072 boot is `apps/cubi_e2e/test/milestone1_imgverify_test.exs`.
 - [ ] shoehorn 0.9 calls its handler's `application_exited/3` for an application started with `Application.ensure_all_started/2` after boot, not only for its `init`/`app` list ([§2.11.7](specs.md)).
 
 ## Results
@@ -48,14 +48,14 @@ all of physical hardware, not only boot. A consequence is that
 
 **iPXE named initrds: work on both.** Script: `kernel vmlinuz …`, `initrd
 stage1.cpio.zst`, `initrd rootfs.squashfs /rootfs.squashfs`, `initrd token
-/kubex-token mode=400`, all over HTTP from `10.0.2.2`.
+/cubi-token mode=400`, all over HTTP from `10.0.2.2`.
 
 - BIOS (QEMU ROM, DHCP → TFTP script → HTTP) and UEFI (OVMF → `ipxe.efi` from
   a FAT disk, script as `autoexec.ipxe`): in both, stage-1 sees both files with
   matching sha256, `mode=400` is applied (`-r--------`), and the squashfs
   loop-mounts.
 - Under UEFI the kernel gets the image name in front of the cmdline
-  (`vmlinuz console=ttyS0 …`). Parse `kubex.*` by key, never by position.
+  (`vmlinuz console=ttyS0 …`). Parse `cubi.*` by key, never by position.
 - `autoexec.ipxe` runs before any DHCP, so it needs `dhcp` first. Production
   scripts are fetched after DHCP and don't care.
 - **The self-wrapped fallback needs alignment.** A plain cpio appended after
@@ -111,7 +111,7 @@ Values are space-padded, so trim them.
 
 **`spl_hostid`: confirmed.** Run in a musl VM (Alpine 6.12 LTS kernel, ZFS
 2.3.9) on one virtio disk, with `insmod spl.ko spl_hostid=…`, no `/etc/hostid`,
-`zpool import -N -o cachefile=none -d /dev kubex`, `multihost=off`:
+`zpool import -N -o cachefile=none -d /dev cubi`, `multihost=off`:
 
 | Previous boot | This boot | Import without `-f` |
 | --- | --- | --- |

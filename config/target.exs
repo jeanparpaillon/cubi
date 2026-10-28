@@ -14,9 +14,9 @@ config :shoehorn, init: [:nerves_runtime, :nerves_pack]
 config :nerves_runtime, startup_guard_enabled: true
 
 # The serial number is the machine ID that erlinit also uses for the hostname:
-# the SMBIOS UUID, or the first MAC (kubex_system_x86_64's kubex-boardid,
+# the SMBIOS UUID, or the first MAC (cubi_system_x86_64's cubi-boardid,
 # docs/specs.md §2.6).
-config :nerves_runtime, boardid_path: "/usr/bin/kubex-boardid"
+config :nerves_runtime, boardid_path: "/usr/bin/cubi-boardid"
 
 # Erlinit can be configured without a rootfs_overlay. See
 # https://github.com/nerves-project/erlinit/ for more information on
@@ -36,15 +36,15 @@ config :logger, :default_handler, false
 
 keys =
   if config_env() == :e2e do
-    # The e2e firmware trusts the kubex_e2e harness key and nothing else
+    # The e2e firmware trusts the cubi_e2e harness key and nothing else
     # (docs/testing.md §3). The key is generated locally, never committed.
-    harness_key = Path.expand("../apps/kubex_e2e/priv/harness_key/id_ed25519.pub", __DIR__)
+    harness_key = Path.expand("../apps/cubi_e2e/priv/harness_key/id_ed25519.pub", __DIR__)
 
     if not File.exists?(harness_key),
       do:
         Mix.raise("""
         No harness key at #{harness_key}.
-        Run `mix kubex.e2e.key` first.
+        Run `mix cubi.e2e.key` first.
         """)
 
     [harness_key]
@@ -66,26 +66,26 @@ config :nerves_ssh,
   authorized_keys: Enum.map(keys, &File.read!/1)
 
 # The root CA the node trusts for deployed releases, installed as
-# /etc/kubex/ca.pem in the served rootfs, and the PKI whose signer signs the
+# /etc/cubi/ca.pem in the served rootfs, and the PKI whose signer signs the
 # served images (docs/specs.md §2.11.2, `mix firmware.ipxe`).
 if config_env() == :e2e do
   # The e2e firmware is signed by the harness's test CA, never the operator's
   # (docs/testing.md §3). Generated locally, never committed.
-  pki = Path.expand("../apps/kubex_e2e/priv/pki", __DIR__)
+  pki = Path.expand("../apps/cubi_e2e/priv/pki", __DIR__)
 
   if not File.exists?(Path.join(pki, "signer.key")),
     do:
       Mix.raise("""
       No test CA in #{pki}.
-      Run `mix kubex.e2e.key` first.
+      Run `mix cubi.e2e.key` first.
       """)
 
-  config :kubex_fw, ca_cert: Path.join(pki, "ca.pem"), signer: pki
+  config :cubi_fw, ca_cert: Path.join(pki, "ca.pem"), signer: pki
 else
-  # The operator's root (`mix kubex.gen_ca`), if there is one. Signing stays an
+  # The operator's root (`mix cubi.gen_ca`), if there is one. Signing stays an
   # explicit `--signer`.
-  ca = Path.join(System.get_env("KUBEX_PKI_DIR") || Path.expand("~/.kubex/pki"), "ca.pem")
-  if File.exists?(ca), do: config(:kubex_fw, ca_cert: ca)
+  ca = Path.join(System.get_env("CUBI_PKI_DIR") || Path.expand("~/.cubi/pki"), "ca.pem")
+  if File.exists?(ca), do: config(:cubi_fw, ca_cert: ca)
 end
 
 # Configure the network using vintage_net

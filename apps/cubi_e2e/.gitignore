@@ -1,0 +1,11 @@
+# The harness key is generated locally (`mix cubi.e2e.key`), never committed.
+/priv/harness_key/
+
+# The test CA is generated locally (`mix cubi.e2e.key`), never committed.
+/priv/pki/
+
+# ExUnit @tag :tmp_dir.
+/tmp/
+
+# ipxe.efi for UEFI PXE boots (`mix cubi.e2e.ipxe`), never committed.
+/priv/ipxe/

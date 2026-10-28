@@ -1,4 +1,4 @@
-[submodule "apps/kubex_system_x86_64"]
-	path = apps/kubex_system_x86_64
-	url = ../kubex_system_x86_64.git
-	branch = kubex
+[submodule "apps/cubi_system_x86_64"]
+	path = apps/cubi_system_x86_64
+	url = ../cubi_system_x86_64.git
+	branch = cubi

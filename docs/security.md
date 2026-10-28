@@ -1,6 +1,6 @@
-# Kubex node boot — security
+# Cubi node boot — security
 
-Part of the kubex node boot plan: design in [specs.md](specs.md), open questions in [questions.md](questions.md), tests in [testing.md](testing.md).
+Part of the cubi node boot plan: design in [specs.md](specs.md), open questions in [questions.md](questions.md), tests in [testing.md](testing.md).
 
 This is the threat model of the recommended setup, and what happens to each
 secret in three scenarios: the first node's boot, a node joining, and nodes
@@ -14,7 +14,7 @@ document's own sections. Points marked
 
 - **Every machine has a TPM 2.0** (discrete or firmware) and boots over UEFI.
   Legacy BIOS boots work, but without the TPM properties below (§6).
-- **At least three storage nodes** (`kubex.vdevs=`, §2.10.2): the Khepri
+- **At least three storage nodes** (`cubi.vdevs=`, §2.10.2): the Khepri
   voters, and the only machines with a pool.
 - **Any number of diskless nodes**, which hold no persistent state and never
   vote.
@@ -30,12 +30,12 @@ adds the TPM, and §7 lists what it changes in the spec.
 
 | Secret | What it opens | Where it lives |
 | --- | --- | --- |
-| **Cluster CA key** | issuing any node identity | Khepri `[kubex, pki, ca]`, on every voter's encrypted dataset |
-| **Masters** | deriving any node token in their scope | the boot server, Khepri `[kubex, tokens, …]` |
+| **Cluster CA key** | issuing any node identity | Khepri `[cubi, pki, ca]`, on every voter's encrypted dataset |
+| **Masters** | deriving any node token in their scope | the boot server, Khepri `[cubi, tokens, …]` |
 | **Node token** | one enrollment, for one UUID | one node's tmpfs, from stage-1 to the end of its join |
 | **OTP** | bootstrapping a cluster | the first node's cmdline, spent minutes after boot |
 | **Node identity key** | being that member: distribution, `/zfs-key` | **inside that machine's TPM**, never exportable |
-| **ZFS key** | every storage node's `<pool>/kubex/crypt` | RAM of unlocked storage nodes; one Shamir share sealed in each storage node's TPM; the operator's export |
+| **ZFS key** | every storage node's `<pool>/cubi/crypt` | RAM of unlocked storage nodes; one Shamir share sealed in each storage node's TPM; the operator's export |
 | **Image signing key** | what every machine will run | offline, with the operator. It never reaches the boot server or a node |
 
 Cluster data (Khepri, logs, crash dumps) is only as safe as the ZFS key.
@@ -52,7 +52,7 @@ in-kernel resource manager `/dev/tpmrm0`. No `tpm2-abrmd` is needed.
 | **AK** (attestation key) | at first join, bound to the EK through `MakeCredential` / `ActivateCredential` | proving to the cluster that the identity key lives in *this* TPM (`TPM2_Certify`) |
 | **Identity key** | at first join: ECC P-256 under the SRK, `fixedTPM \| fixedParent`, kept at a persistent handle (`0x81…`) | the TLS key for joins, distribution and `/zfs-key`. A persistent handle survives reboots without a disk, so diskless nodes keep their identity too |
 | **Identity certificate** | issued by the cluster at join | stored in a TPM NV index. It is public, and keeping it there lets a diskless node boot straight into the handshake |
-| **ZFS key share** | when a storage node becomes a voter, then at every reshare (§4.3) | a sealed object whose blob sits in clear on `<pool>/kubex/identity`. It unseals only in this TPM, under the PCR policy below |
+| **ZFS key share** | when a storage node becomes a voter, then at every reshare (§4.3) | a sealed object whose blob sits in clear on `<pool>/cubi/identity`. It unseals only in this TPM, under the PCR policy below |
 
 **The PCR policy** used for sealing is authorized by a signature
 (`PolicyAuthorize`) rather than fixed PCR values. Each release ships the PCR
@@ -80,8 +80,8 @@ takes the same option in `-ssl_dist_optfile`.
 ### 4.1 First node boot
 
 The machine is in the boot server's inventory (UUID + EK hash), with a blank
-pool and `kubex.zfs.create=1`. The boot server renders its script with
-`kubex.bootstrap=<OTP>`, once.
+pool and `cubi.zfs.create=1`. The boot server renders its script with
+`cubi.bootstrap=<OTP>`, once.
 
 ```mermaid
 sequenceDiagram
@@ -91,15 +91,15 @@ sequenceDiagram
     participant T as Its TPM
 
     N->>BS: UEFI → signed iPXE (measured into PCR 4), script for its UUID
-    BS-->>N: signed images, kubex.bootstrap=<OTP>, no token
+    BS-->>N: signed images, cubi.bootstrap=<OTP>, no token
     N->>N: imgverify, stage-1, BEAM, create the pool
     N->>T: create the identity key at a persistent handle
     N->>O: console: bootstrap page address + certificate fingerprint
     O->>N: checks the fingerprint, types the OTP
     N->>N: CA key, own certificate (CN = UUID, EK hash in the member record)
-    N->>N: ZFS key, <pool>/kubex/crypt, Khepri with itself as only voter
+    N->>N: ZFS key, <pool>/cubi/crypt, Khepri with itself as only voter
     N->>T: seal share 1 of 1 (k = 1), certificate to NV
-    N-->>O: two masters + kubex.join= value, once
+    N-->>O: two masters + cubi.join= value, once
     O->>BS: masters into its config, other machines into the inventory
     O->>N: Cluster.export_zfs_key/0, kept offline
 ```
@@ -121,7 +121,7 @@ sequenceDiagram
 | Secret | Where |
 | --- | --- |
 | CA key, masters | Khepri on the first node (encrypted dataset), masters also on the boot server |
-| OTP | spent. A reboot refuses `kubex.bootstrap=` because the pool holds a store |
+| OTP | spent. A reboot refuses `cubi.bootstrap=` because the pool holds a store |
 | identity key | the first node's TPM |
 | ZFS key | its RAM, its TPM (sealed, k = 1), the operator's export |
 
@@ -160,7 +160,7 @@ What the challenge proves, step by step:
   certificate for a key that can never leave that machine.
 
 **Diskless node.** After the handshake it is a client of the store over the
-kubex API (§2.10.2). It never asks for the ZFS key: `/zfs-key` refuses every
+cubi API (§2.10.2). It never asks for the ZFS key: `/zfs-key` refuses every
 diskless member. On its next boot it goes straight to the handshake with the
 key and certificate from its TPM. There is no token file, no fresh key, and
 the member record is not replaced (§4.3).
@@ -169,16 +169,16 @@ the member record is not replaced (§4.3).
 operator runs `Cluster.promote/1`. Then:
 
 1. It fetches the ZFS key from `/zfs-key` over mTLS with its TPM key
-   (§2.10.4), creates `<pool>/kubex/crypt`, and starts Khepri, which joins as a
+   (§2.10.4), creates `<pool>/cubi/crypt`, and starts Khepri, which joins as a
    voter (`khepri_cluster:join/2`).
 2. **Reshare.** The voter set changed, so the member holding the key computes
    a new Shamir split of the same key: n = voters, k = ⌊n/2⌋ + 1. Each share
    goes to its node over distribution. Every node seals its own share in its
-   TPM, writes the blob to `/kubex/identity`, deletes the previous one, and
+   TPM, writes the blob to `/cubi/identity`, deletes the previous one, and
    acks. Once every node has acked, the epoch commits in Khepri.
 3. **The roster.** With the new epoch, the CA signs a roster: the epoch, k,
    the ZFS key's SHA-256, and each voter's UUID, certificate fingerprint and
-   address. Every storage node keeps it in clear in `/kubex/identity`. Cold
+   address. Every storage node keeps it in clear in `/cubi/identity`. Cold
    start (§4.3) authenticates peers against it, because Khepri cannot answer
    then.
 
@@ -202,7 +202,7 @@ Ordered from routine to catastrophic.
 | Event | What happens | Who has to act |
 | --- | --- | --- |
 | **A diskless node reboots** | Handshake with its TPM identity. Same member, same certificate. The stale-member expiry of [phase 7](phase7.md) only applies to nodes without a TPM | nobody |
-| **A storage node reboots, quorum holds** | Import the pool, fetch the ZFS key from `/zfs-key` (the `kubex.join=` host, then the roster's peers) with its TPM key, unlock, rejoin Khepri, Ra catches up | nobody |
+| **A storage node reboots, quorum holds** | Import the pool, fetch the ZFS key from `/zfs-key` (the `cubi.join=` host, then the roster's peers) with its TPM key, unlock, rejoin Khepri, Ra catches up | nobody |
 | **A minority of storage nodes is down** | The cluster runs. Each returning node unlocks as in the row above | nobody |
 | **A majority of storage nodes is down** | No quorum: no joins, no writes. The surviving storage nodes still hold the key in RAM and serve `/zfs-key` from the roster, so returning nodes unlock and quorum comes back | nobody, as long as one storage node stayed up |
 | **Every storage node is down** (power loss) | Cold start from the shares, below | nobody, if k storage machines come back with their TPMs intact |
@@ -246,17 +246,17 @@ so nothing in the image may hand an attacker a shell:
   arguments and a clean environment. The kernel hands unknown `key=value`
   cmdline arguments to init as environment variables. Without `env -i`, a
   cmdline `ERL_AFLAGS=…` reaches the BEAM as VM arguments (checked in
-  `apps/kubex_e2e/test/stage1_test.exs`).
+  `apps/cubi_e2e/test/stage1_test.exs`).
 - **`rdinit=` is chosen by the kernel, before stage-1 runs**, and the kernel
   passes leftover cmdline words to it as `argv`. With busybox in the
   initramfs, `rdinit=/bin/busybox sh` is a root shell with the token still in
-  `/kubex/token` (checked in QEMU). Stage-1 cannot prevent that. A production
+  `/cubi/token` (checked in QEMU). Stage-1 cannot prevent that. A production
   initramfs therefore holds no busybox: stage-1 becomes the small static C
   program §2.4 anticipates ([phase 5](phase5.md)), so that `rdinit=` can only
   name `/init` or a non-executable file.
-- **Only `kubex.*` arguments, `console=` and a short allowlist are read**,
+- **Only `cubi.*` arguments, `console=` and a short allowlist are read**,
   and none of them can grant a shell or disable a check.
-  `kubex.token=` and `kubex.zfs.testkey=` are compiled out of production
+  `cubi.token=` and `cubi.zfs.testkey=` are compiled out of production
   images.
 - **Signing the per-node scripts with `imgverify`** would close this
   properly, but it puts a signing key online on the boot server. It is left
@@ -272,7 +272,7 @@ key.
 | --- | --- | --- |
 | **On the network segment** | nothing: everything after the chainload is HTTPS, joins are NH1-signed, distribution is mTLS | serve the chainload step from a dedicated VLAN |
 | **Holds a leaked node token** | nothing without the machine: the EK check fails | rotate the master (§2.8.1) |
-| **Root on a diskless node** | that node's identity while it runs, the kubex API's reach | the API's authorization (out of scope here) |
+| **Root on a diskless node** | that node's identity while it runs, the cubi API's reach | the API's authorization (out of scope here) |
 | **Root on a storage node** | everything: CA key, masters, ZFS key in RAM | remove it and rotate the CA, masters and ZFS key. The TPM doesn't help against a live compromise |
 | **Controls the boot server** | the masters, the inventory, and so the allowlist. It can make a machine of its choosing join as **diskless** | storage enrollment still needs `Cluster.promote/1` before any key fetch (§4.2) |
 | **Controls the boot server and the network** | can boot our machines with a hostile cmdline | §5's hardening rules |
@@ -285,9 +285,9 @@ To be folded into the spec once agreed:
 
 - **§2.8.3:** with a TPM, diskless nodes keep their identity across reboots,
   and the token file is served only until the first join, whatever the role.
-- **§2.9.3:** `Kubex.Credentials` gains the `Tpm` configurator, tried first.
+- **§2.9.3:** `Cubi.Credentials` gains the `Tpm` configurator, tried first.
 - **§2.9.4:** the join gains the EK check and the `MakeCredential` round-trip.
-- **§2.10.3:** `/kubex/identity` holds the certificate, the CA chain, the
+- **§2.10.3:** `/cubi/identity` holds the certificate, the CA chain, the
   sealed share blob and the signed roster, but no private key.
 - **§2.10.4:** `/zfs-key` serves storage members only once promoted, not while
   `registered`. Cold start uses the shares first and the unlock page as the

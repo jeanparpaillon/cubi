@@ -1,4 +1,4 @@
-# Kubex node boot — open questions
+# Cubi node boot — open questions
 
 Decisions not yet taken. Section numbers refer to [specs.md](specs.md).
 
@@ -10,12 +10,12 @@ Decisions not yet taken. Section numbers refer to [specs.md](specs.md).
   engine or provider that OTP 29's `crypto` can drive
   ([security.md](security.md) §3) **(verify)**.
 - **Backups.** Khepri on ZFS survives node and whole-cluster restarts, but not
-  losing a majority of pools. `zfs snapshot` of `<pool>/kubex/crypt/khepri`,
+  losing a majority of pools. `zfs snapshot` of `<pool>/cubi/crypt/khepri`,
   plus a raw `zfs send -w` off-cluster, is the obvious answer. The blocks stay
   encrypted and the exported ZFS key opens them. It needs Ra's view of a
   consistent snapshot point **(verify)**.
 - **Khepri before 1.0.** The API may change. Pin the version, and keep Khepri
-  calls behind one kubex module so that an upgrade touches a single place.
+  calls behind one cubi module so that an upgrade touches a single place.
 - **ZFS licensing** for distributed images ([§2.10.5](specs.md)).
 - **When is a deployed release good?** In milestone 1 any exit of a release's
   application rolls back, even long after the settle period
@@ -42,10 +42,10 @@ Decisions not yet taken. Section numbers refer to [specs.md](specs.md).
 - **Revocation of signers.** None in milestone 1 ([§2.11.1](specs.md)). A CRL in
   the image, or a signed revocation list deployed like a release, would let a
   leaked signer be cut off without a new root.
-- **`kubex.join=` names one host.** If that node is down, joins fail. A list of
+- **`cubi.join=` names one host.** If that node is down, joins fail. A list of
   hosts, or a DNS name kept up to date by the cluster, would avoid that.
 - **Diskless nodes' logs and crash dumps** vanish with the RAM; storage nodes
-  keep theirs in `<pool>/kubex/log`. Shipping logs from diskless nodes to a
+  keep theirs in `<pool>/cubi/log`. Shipping logs from diskless nodes to a
   storage node over `logger` is the simple fix.
 - **RAM floor.** Compressed rootfs + BEAM working set + tmpfs `/root`. From
   [phase 0](phase0.md), a hello-world image reaches IEx at 192 MB, with Ubuntu's

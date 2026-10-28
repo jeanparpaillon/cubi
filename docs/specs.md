@@ -650,6 +650,21 @@ The sysfs sources:
 for SCSI and SATA. The values are space-padded. The alternative, adding eudev
 to the system, is heavier for one lookup.
 
+The names are exactly udev's (`60-persistent-storage.rules`): `virtio-<serial>`;
+`nvme-<model>_<serial>` (namespace 1 only), `nvme-<model>_<serial>_<nsid>` and
+`nvme-<wwid>`; `wwn-0x<naa>` for SCSI and SATA. Values are trimmed, whitespace
+runs become one `_`, other ASCII outside udev's allowed set becomes `_`. So a
+name copied from `/dev/disk/by-id` on any Linux works. `ata-…` and `scsi-…`
+names are not offered: udev reads them from the disk (`ata_id`, `scsi_id`), not
+from sysfs. The parse refuses rather than guesses, so a typo cannot reach
+`zpool create`:
+
+- a kernel name (`vda`, `/dev/nvme0n1`), which is not stable across boots;
+- a name no disk has, or one that two disks answer to;
+- the same device twice, an empty name, a vdev keyword with nothing after it;
+- any of the three arguments given twice, `kubex.zfs.create=` other than `0`
+  or `1`, and a pool name `zpool` would reject.
+
 What the pool gives the boot flow:
 
 - **Rejoin without a token** (§2.8.3): `/kubex/identity` holds the key and

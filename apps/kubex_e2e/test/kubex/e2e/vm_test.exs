@@ -79,6 +79,19 @@ defmodule Kubex.E2E.VMTest do
     assert {"-device", "nvme,drive=d1,serial=KBXN0"} in p
   end
 
+  test "fixture disks live in the VM's directory, named after their serial" do
+    argv =
+      VM.argv(
+        VM.normalize(spec(disks: [{:virtio, "KBXD0", :blank}, {:nvme, "KBXN0", :dirty}])),
+        @paths
+      )
+
+    p = pairs(argv)
+
+    assert {"-drive", "if=none,id=d0,file=/t/dir/disk-KBXD0.qcow2,format=qcow2"} in p
+    assert {"-drive", "if=none,id=d1,file=/t/dir/disk-KBXN0.qcow2,format=qcow2"} in p
+  end
+
   test "several initrds, or a named one, become one assembled file in the test dir" do
     for initrds <- [["a", "b"], [{"/kubex/token", "t", 0o400}]] do
       argv = VM.argv(VM.normalize(spec(boot: {:direct, "/k", initrds, ""})), @paths)

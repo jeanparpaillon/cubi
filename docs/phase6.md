@@ -10,7 +10,10 @@ Part of the kubex node boot plan: design in [specs.md](specs.md), open questions
       Checked by hand in QEMU: a virtio + NVMe mirror created; after a power-off without export, imported without
       `-f`, a synced file still there (an unsynced one written just before is lost, as it should be); without the
       key, `crypt` stays locked; a GPT disk and a missing `kubex.zfs.create=1` both refused, the disk untouched.
-- [ ] Harness: `Disk` fixtures (blank, dirty, kept across reboots) on virtio-blk and NVMe with explicit serials ([testing.md](testing.md) §5).
+- [x] Harness: `Disk` fixtures (blank, dirty, kept across reboots) on virtio-blk and NVMe with explicit serials ([testing.md](testing.md) §5).
+      `Kubex.E2E.Disk` and `restart_vm!/2`. `phase6_storage_test.exs` covers the acceptance below with an `O_SYNC`
+      file standing in for Khepri until step 4, plus: no key leaves `crypt` locked, another pool name over a used
+      disk is refused, and refused disks are byte-identical afterwards.
 - [ ] Start Khepri on `/kubex/khepri` with node name `kubex@<UUID>`, and export the pool on shutdown.
 
 **Acceptance:**

@@ -39,14 +39,13 @@ defmodule Kubex.E2E.VM do
   @type boot ::
           {:direct, Path.t(), [Kubex.E2E.Initrd.part()], String.t()}
           | {:pxe, :tftp | :http, Path.t()}
-  @type disk :: {:virtio | :nvme, serial :: String.t(), file :: Path.t()}
   @type t :: %__MODULE__{
           name: String.t(),
           uuid: String.t() | nil,
           mac: String.t() | nil,
           firmware: :bios | :uefi,
           memory: pos_integer(),
-          disks: [disk()],
+          disks: [Kubex.E2E.Disk.t()],
           rtc: :host | {:skew, DateTime.t()},
           boot: boot()
         }
@@ -83,7 +82,7 @@ defmodule Kubex.E2E.VM do
       ["-uuid", spec.uuid, "-smbios", "type=1,uuid=#{spec.uuid}"],
       firmware_args(spec.firmware, paths),
       rtc_args(spec.rtc),
-      disk_args(spec.disks),
+      disk_args(spec.disks, paths),
       net_args(spec, paths),
       boot_args(spec.boot, paths),
       ["-chardev", "socket,id=con,path=#{socket(paths, :console)},server=on,wait=off"],
@@ -120,10 +119,11 @@ defmodule Kubex.E2E.VM do
     ["-rtc", "base=#{base}"]
   end
 
-  defp disk_args(disks) do
+  defp disk_args(disks, paths) do
     disks
     |> Enum.with_index()
-    |> Enum.map(fn {{bus, serial, file}, i} ->
+    |> Enum.map(fn {{bus, serial, kind}, i} ->
+      file = Kubex.E2E.Disk.path(paths.dir, serial, kind)
       id = "d#{i}"
       device = %{virtio: "virtio-blk-pci", nvme: "nvme"} |> Map.fetch!(bus)
 
@@ -226,6 +226,7 @@ defmodule Kubex.E2E.VM do
 
     paths = %{dir: dir, run_dir: make_run_dir(), ssh_port: free_port()}
     prepare_firmware(spec.firmware, paths)
+    Enum.each(spec.disks, &Kubex.E2E.Disk.prepare!(dir, &1))
     prepare_initrd(spec.boot, paths)
     {http, paths} = start_http(spec.boot, paths)
     prepare_pxe(spec, paths)
@@ -273,6 +274,9 @@ defmodule Kubex.E2E.VM do
   @impl GenServer
   def handle_info({:EXIT, pid, reason}, %{qemu: pid} = state),
     do: {:stop, {:qemu_exited, reason}, state}
+
+  # The ports of System.cmd calls made in init/1 (qemu-img) close normally.
+  def handle_info({:EXIT, port, _reason}, state) when is_port(port), do: {:noreply, state}
 
   def handle_info({:EXIT, _pid, reason}, state), do: {:stop, reason, state}
 

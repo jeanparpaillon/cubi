@@ -30,7 +30,7 @@ from ExUnit. It is not part of any firmware.
 | `Kubex.E2E.Console` | The serial console (`-chardev socket,…` + `-serial chardev:…`), copied to a log file. Expect-style matching: `await(vm, ~r/Kernel command line/, 30_000)` |
 | `Kubex.E2E.Node` | Runs Elixir on the guest over `nerves_ssh` exec with the harness key (§3). `eval(vm, "Nerves.Runtime.firmware_valid?()")` returns a term, sent back through `:erlang.term_to_binary/1` + Base64, so it isn't scraped from IEx output |
 | `Kubex.E2E.Sandbox` | Tier 2's network namespace: bridge, taps, dnsmasq, boot server, NTP, packet capture (§4.2) |
-| `Kubex.E2E.Disk` | qcow2 fixtures: blank, pre-partitioned ("dirty"), and pools carried over between boots (§5) |
+| `Kubex.E2E.Disk` | qcow2 fixtures: blank, pre-partitioned ("dirty"), and pools carried over between boots (§5). `restart_vm!/2` in the case template power-cycles a machine onto the same disks |
 | `Kubex.E2E.Cluster` | N-VM fixture with helpers: `bootstrap/2` (drives the OTP page), `boot_storage/2`, `boot_diskless/2`, `restart_all/1`, `voters/1` |
 | `Kubex.E2E.Leak` | Scans every serial log, the packet capture and each guest's `/root` for every secret the test minted: masters, node tokens, OTPs and the ZFS key ([specs §2.8.5](specs.md), [§2.10.4](specs.md)). For the ZFS key it also scans the raw disk images |
 
@@ -175,11 +175,16 @@ qemu-system-x86_64 -machine q35,accel=kvm -cpu host -m 1024 -nographic \
 - **Disk serials are set explicitly** (`serial=`), so the sysfs resolution of
   `kubex.vdevs=` ([specs §2.10.3](specs.md)) is tested against known names, on
   both virtio-blk and NVMe.
-- **Dirty disks** are qcow2 images with a partition table written by `sfdisk`,
-  or with a stale ZFS label. These are for the "must refuse to create" cases.
-- **Pools survive reboots** because the qcow2 files are kept for the test's
-  lifetime. A "disk swap" is a VM restarted with a fresh blank disk under the
-  same serial.
+- **Disk kinds:** `:blank` is an empty 8G sparse qcow2 (`<pool>/kubex`
+  reserves 4G), `:dirty` the same with a GPT written by `sfdisk`, and a path is
+  an image the test made itself. A stale ZFS label needs no fixture: a pool
+  left on kept disks is one (`phase6_storage_test.exs` asks for another pool
+  name over it). These are for the "must refuse to create" cases;
+  `Disk.digest!/1` checks a refused disk was not written.
+- **Pools survive reboots** because the images, `disk-<serial>.qcow2` in the
+  VM's directory, are made when missing and kept otherwise, for the test's
+  lifetime. A "disk swap" is `Disk.discard!/2` before a restart: a fresh blank
+  disk under the same serial.
 
 ## 6. Fault injection
 

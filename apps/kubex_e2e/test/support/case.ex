@@ -6,13 +6,13 @@ defmodule Kubex.E2E.Case do
   the start of the test and left in place afterwards, with the console log,
   the QMP log and the QEMU argv, so a failure can be read after the fact.
   `start_vm!/2` starts a machine under the test supervisor, which stops it
-  when the test ends.
+  when the test ends; `restart_vm!/2` power-cycles it.
   """
   use ExUnit.CaseTemplate
 
   using do
     quote do
-      import Kubex.E2E.Case, only: [start_vm!: 2]
+      import Kubex.E2E.Case, only: [start_vm!: 2, restart_vm!: 2]
       alias Kubex.E2E.{Console, Node, VM}
     end
   end
@@ -34,6 +34,17 @@ defmodule Kubex.E2E.Case do
       {Kubex.E2E.VM, spec: spec, dir: Path.join(context.dir, spec.name)},
       shutdown: 10_000
     )
+  end
+
+  @doc """
+  Powers `spec`'s machine off, as by pulling the plug, and starts it again:
+  same directory, same disks (`Kubex.E2E.Disk`). `spec` may differ, in its
+  cmdline for instance.
+  """
+  @spec restart_vm!(map(), Kubex.E2E.VM.t()) :: pid()
+  def restart_vm!(context, spec) do
+    :ok = ExUnit.Callbacks.stop_supervised({Kubex.E2E.VM, spec.name})
+    start_vm!(context, spec)
   end
 
   defp slug(name) do

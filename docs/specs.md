@@ -927,16 +927,36 @@ releases/<version>/sys.config     build-time configuration
 
 - **`--base`** names a served directory (§2.3), from which it reads
   `base.json`: the OTP release, the ERTS version and every application with its
-  version in the image. `mix firmware.ipxe` writes that file. Applications in
-  `base.json` at the same version are left out of the archive; at another
-  version, the task refuses. This covers `elixir` and `logger` too, so the
-  release must be compiled with the image's Elixir.
+  version in the image. `mix firmware.ipxe` writes that file. The host's OTP
+  major must be the image's. Each application of the `mix release` is then
+  sorted (`Kubex.Tools.Release.plan/3`), and every problem is reported at once:
+
+  | Application | Becomes |
+  | --- | --- |
+  | part of OTP (OTP's `installed_application_versions`), in the image | nothing: never shipped, whatever the host's patch version. The image's come from the Nerves system and may carry NIFs built for its libc |
+  | part of OTP, not in the image | a refusal: the firmware must add it |
+  | in the image at the same version | an entry in the manifest's `requires` |
+  | in the image at another version | a refusal: two versions cannot be loaded at once |
+  | anything else | shipped |
+
+  `elixir`, `logger` and the rest of Elixir are not OTP's, so the release must
+  be compiled with the image's Elixir. Elixir applications the image lacks
+  (`eex`, for a Plug app) are shipped.
 - **Same target as the image.** Pure Erlang and Elixir code builds anywhere;
   NIFs need the project built with the image's `MIX_TARGET` and system, as
   `kubex_fw` is.
-- **Configuration is build-time only.** `sys.config` is applied with
-  `Application.put_all_env/1` before the applications start. `config/runtime.exs`
-  is not evaluated in milestone 1, and its presence is a warning.
+- **Configuration is build-time only, and only the shipped applications'.**
+  `sys.config` is applied with `Application.put_all_env/1` before the
+  applications start, so configuration for one of the image's applications
+  (`config :logger`, say) would change the image: it is dropped, with a
+  warning. `config/runtime.exs` is not evaluated in milestone 1, and its
+  presence is a warning.
+- **Protocols.** The image's protocols are consolidated (`Enumerable`,
+  `Inspect`, `String.Chars`, `JSON.Encoder`, `Jason.Encoder`…), so a release's
+  own implementation of one of them is never dispatched to. Protocols the
+  release defines are fine: they are shipped unconsolidated, from `ebin/`.
+  The `mix release`'s `consolidated/` directory is not packed
+  ([questions.md](questions.md)).
 - **`manifest.json`** (Elixir's `JSON`, so nothing extra on the node):
 
   | Key | What |
@@ -945,6 +965,7 @@ releases/<version>/sys.config     build-time configuration
   | `name`, `version` | the release |
   | `otp_release`, `erts_version` | what it was built for, copied from `base.json` |
   | `applications` | `[{name, vsn}]`, every application in the archive |
+  | `requires` | `{name: vsn}`, the image's applications the release uses, OTP's excepted |
   | `start` | the applications to start, in order: the release's own, not their dependencies, which `ensure_all_started` reaches |
   | `files` | `{path: sha256}` for every other file in the archive |
 
@@ -970,7 +991,9 @@ The node verifies with `:public_key` only, no OpenSSL, in this order:
    with no `..` and no symlinks.
 4. `format` is known and `otp_release` is the node's.
 5. Every application in `applications` is either absent from the node's
-   `lib/` or present there at the same version (then skipped).
+   `lib/` or present there at the same version (then skipped), and every one
+   in `requires` is present at exactly that version: the release was built for
+   this image.
 
 At deploy (§2.11.5) the signer's validity dates are checked against the node's
 clock, which `nerves_time` keeps at least at the image's build time. At boot

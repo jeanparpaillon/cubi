@@ -22,7 +22,10 @@ defmodule KubexHello.MixProject do
     [
       {:bandit, "~> 1.6"},
       {:plug, "~> 1.16"},
-      {:req, "~> 0.5", only: :test}
+      {:req, "~> 0.5", only: :test},
+      # mix kubex.release / kubex.sign / kubex.deploy (docs/specs.md §2.11).
+      # Host-only, never in the release.
+      {:kubex_tools, path: "../../apps/kubex_tools", runtime: false}
     ]
   end
 end

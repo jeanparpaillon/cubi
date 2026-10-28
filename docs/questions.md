@@ -33,6 +33,12 @@ Decisions not yet taken. Section numbers refer to [specs.md](specs.md).
   ([§2.11.3](specs.md)). `Config.Reader` is on the node, but runtime config
   read from the node's environment needs a decision on what that environment
   is.
+- **Protocol implementations in releases.** The image's consolidated
+  protocols ignore a release's implementations of them ([§2.11.3](specs.md)).
+  Re-consolidating on the node at install (`Protocol.consolidate/2` over the
+  image's and the release's code paths, loaded with the release and purged
+  with it) would lift that, at the cost of replacing modules the image's own
+  processes use.
 - **Revocation of signers.** None in milestone 1 ([§2.11.1](specs.md)). A CRL in
   the image, or a signed revocation list deployed like a release, would let a
   leaked signer be cut off without a new root.

@@ -13,6 +13,11 @@ config :shoehorn, init: [:nerves_runtime, :nerves_pack]
 # way of validating that firmware is good.
 config :nerves_runtime, startup_guard_enabled: true
 
+# The serial number is the machine ID that erlinit also uses for the hostname:
+# the SMBIOS UUID, or the first MAC (kubex_system_x86_64's kubex-boardid,
+# docs/specs.md §2.6).
+config :nerves_runtime, boardid_path: "/usr/bin/kubex-boardid"
+
 # Erlinit can be configured without a rootfs_overlay. See
 # https://github.com/nerves-project/erlinit/ for more information on
 # configuring erlinit.

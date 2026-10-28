@@ -149,12 +149,16 @@ its only module is `efivarfs` ([phase 0](phase0.md) has the table). On top of it
 
 ### 2.6 `erlinit.config` and runtime configuration
 
-- Drop the `-m /dev/…:/root` mount: stage-1 owns `/root`.
-- Replace `-d /usr/bin/boardid` with a small script that prints the SMBIOS UUID
-  (falling back to the first MAC). This only gives a hostname for `erlinit -n`
-  and the console, and the stable Erlang node name `kubex@<UUID>` that a Khepri
-  member needs (§2.10.2). It is *not* the cluster identity, which is the
-  certificate assigned on join (§2.8).
+- Drop both `-m` mounts: stage-1 owns `/root`, and there is no boot partition.
+- Replace `-d /usr/bin/boardid` with `/usr/bin/kubex-boardid`, a small script
+  that prints the SMBIOS UUID, or the first MAC without colons when the UUID is
+  blank (all zeros or all `f`). The hostname is that ID as is (`-n %s`), and
+  `nerves_runtime`'s `:boardid_path` points at the same script, so
+  `serial_number/0` agrees. This gives the hostname and the stable Erlang node
+  name `kubex@<UUID>` that a Khepri member needs (§2.10.2). It is *not* the
+  cluster identity, which is the certificate assigned on join (§2.8). The MAC
+  fallback only sees NICs whose driver is built in: erlinit runs the script
+  before anything loads modules.
 - `config :nerves_runtime, kv_backend: {Nerves.Runtime.KVBackend.InMemory,
   contents: %{…}}`, filled at build time with `nerves_fw_active`,
   `a.nerves_fw_version`, `a.nerves_fw_uuid` …, and `nerves_fw_validated: "1"`.

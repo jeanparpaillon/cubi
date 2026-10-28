@@ -10,7 +10,10 @@ Part of the kubex node boot plan: design in [specs.md](specs.md), open questions
       `package/kubex-stage1` (static busybox, `gen_init_cpio`) and `stage1/mkstage1.sh`, called from
       `post-createfs.sh`; also `images/stage1-dev.cpio.zst`. The e2e suite now boots the system's kernel and
       stage-1 by default (`Kubex.E2E.Artifacts`).
-- [ ] Apply the `erlinit.config` and `boardid` changes from [§2.6](specs.md).
+- [x] Apply the `erlinit.config` and `boardid` changes from [§2.6](specs.md).
+      In the system: no `-m` mounts, `-d /usr/bin/kubex-boardid` and `-n %s`; `nerves_runtime`'s
+      `:boardid_path` points at the same script (`config/target.exs`). Tested by
+      `apps/kubex_e2e/test/phase2_system_fork_test.exs`, which also automates the step 1 checks.
 
 **Acceptance:** the phase-1 QEMU command boots with artifacts from the fork alone.
 

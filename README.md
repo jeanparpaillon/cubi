@@ -8,7 +8,9 @@ Linux plus BEAM. Nothing else runs on it.
 
 To upgrade a node, reboot it.
 
-> **Status: design stage.** Nothing is built yet. The design is in
+> **Status: phase 3 of 8.** A node image builds and boots to IEx in QEMU, from
+> a directory iPXE can serve ([Quickstart](#quickstart)). Clustering (join,
+> membership, storage) is not built yet. The design is in
 > [docs/specs.md](docs/specs.md), and the work plan is the set of phases
 > [below](#roadmap).
 
@@ -109,6 +111,114 @@ kubex is a good fit when:
 It is not a good fit when you need to run containers for other languages, mix
 workloads from several teams with resource quotas, or use the Kubernetes
 ecosystem: Helm, operators, managed cloud integrations.
+
+## Quickstart
+
+### Prerequisites
+
+- Elixir 1.20 and the `nerves_bootstrap` archive
+  (`mix archive.install hex nerves_bootstrap`);
+- `fwup` and `squashfs-tools` (`unsquashfs`, `mksquashfs`);
+- QEMU for x86_64 with its iPXE NIC ROMs (`qemu-system-x86`, `ipxe-qemu` on
+  Debian/Ubuntu), and read-write access to `/dev/kvm`;
+- `libmnl-dev`, only for host builds of `kubex_fw` (a root `mix test`).
+
+The Nerves system is a git submodule:
+
+```sh
+git submodule update --init
+```
+
+### Build an iPXE directory
+
+`mix firmware.ipxe` runs `mix firmware`, then turns the `.fw` into the
+directory a boot server serves:
+
+```sh
+cd apps/kubex_fw
+export MIX_TARGET=x86_64
+export BR2_PRIMARY_SITE=https://sources.buildroot.net
+mix deps.get
+mix firmware.ipxe
+```
+
+The first build compiles the Nerves system with Buildroot, which takes about an
+hour. It is cached in `~/.nerves/artifacts` afterwards. `BR2_PRIMARY_SITE` is
+needed because some upstream source URLs are dead; Buildroot still checks every
+hash.
+
+The output lands in `_build/<target>_<env>/ipxe/` at the repository root, so
+`_build/x86_64_dev/ipxe/` by default:
+
+| File | What |
+| --- | --- |
+| `vmlinuz` | the kernel |
+| `stage1.cpio.zst` | the stage-1 initramfs, which loop-mounts the rootfs and starts BEAM |
+| `rootfs.squashfs` | Linux userland, ERTS and the release, plus the firmware metadata |
+| `boot.ipxe` | the iPXE script, with relative URLs: serve the directory from anywhere |
+| `SHA256SUMS` | checksums of the four files above |
+
+`--cmdline "console=ttyS0 …"` sets the kernel arguments written into
+`boot.ipxe` (default `console=ttyS0`).
+
+Which ssh keys the image trusts depends on `MIX_ENV`:
+
+- **`dev`** (default) trusts your `~/.ssh/id_{rsa,ecdsa,ed25519}.pub`;
+- **`e2e`** trusts only the test harness key. Create it once with
+  `mix kubex.e2e.key` in `apps/kubex_e2e`, then build with
+  `MIX_ENV=e2e mix firmware.ipxe`. The output is in `_build/x86_64_e2e/ipxe/`.
+
+### Boot it in QEMU
+
+QEMU's user-mode network has a built-in DHCP and TFTP server, and its NIC ROMs
+are iPXE, so a diskless VM can boot the directory as is. No root is needed:
+
+```sh
+qemu-system-x86_64 -enable-kvm -m 1024 -nographic -boot n \
+  -device virtio-net-pci,netdev=n0 \
+  -netdev user,id=n0,tftp=_build/x86_64_dev/ipxe,bootfile=boot.ipxe,hostfwd=tcp:127.0.0.1:2222-:22
+```
+
+The serial console ends at the IEx prompt. `Ctrl-a x` quits QEMU. Give the VM
+at least 1 GiB: the rootfs lives in RAM.
+
+The same over HTTP, which is how a real boot server serves the files:
+
+```sh
+(cd _build/x86_64_dev/ipxe && python3 -m http.server 8000 --bind 127.0.0.1) &
+qemu-system-x86_64 -enable-kvm -m 1024 -nographic -boot n \
+  -device virtio-net-pci,netdev=n0 \
+  -netdev user,id=n0,bootfile=http://10.0.2.2:8000/boot.ipxe
+```
+
+`10.0.2.2` is the host as the guest sees it.
+
+The `hostfwd` in the first command forwards host port 2222 to the node's ssh,
+which runs Elixir rather than a shell:
+
+```sh
+ssh -p 2222 localhost 'Nerves.Runtime.firmware_validation_status()'
+# e2e image:
+ssh -p 2222 -i apps/kubex_e2e/priv/harness_key/id_ed25519 localhost '…'
+```
+
+These commands boot under BIOS (SeaBIOS). UEFI netboot (OVMF with
+`ipxe.efi`) is [phase 4](docs/phase4.md) and does not work yet.
+
+### Run the tests
+
+The automated tests boot the `e2e` image in QEMU, so build it first (see
+[above](#build-an-ipxe-directory)), then:
+
+```sh
+cd apps/kubex_e2e
+mix test                    # unit tests
+mix test --only e2e:tier1   # boots VMs from _build/x86_64_e2e/ipxe/
+```
+
+Each test keeps its serial log, QMP log and QEMU argv in
+`_build/e2e/<module>/<test>/`. The harness is described in
+[docs/testing.md](docs/testing.md).
 
 ## Roadmap
 

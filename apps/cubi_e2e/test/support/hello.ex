@@ -71,12 +71,13 @@ defmodule Cubi.E2E.Hello do
   end
 
   @doc """
-  `mix cubi.deploy` of `archive` to the VM's forwarded ssh port, with the
-  harness key. Returns `{output, exit_status}`.
+  `mix cubi.deploy` of `archive` to the VM's forwarded ssh port (or that port
+  itself, for a `Cubi.Provider.Qemu` instance), with the harness key. Returns `{output, exit_status}`.
   """
-  @spec deploy(GenServer.server(), Path.t()) :: {String.t(), non_neg_integer()}
+  @spec deploy(GenServer.server() | :inet.port_number(), Path.t()) ::
+          {String.t(), non_neg_integer()}
   def deploy(vm, archive) do
-    port = VM.info(vm).paths.ssh_port
+    port = if is_integer(vm), do: vm, else: VM.info(vm).paths.ssh_port
 
     args =
       ["cubi.deploy", "127.0.0.1", archive, "--port", Integer.to_string(port)] ++

@@ -1247,13 +1247,20 @@ The operator's configuration moves from the image to the cmdline, read with
   deploy. `Cubi.Tools.BootScript` refuses to render such a script unless
   given `--no-ssh`.
 - **2048 bytes.** `Cubi.Tools.BootScript` refuses a cmdline longer than
-  `COMMAND_LINE_SIZE` rather than let the kernel truncate it silently.
+  `COMMAND_LINE_SIZE` rather than let the kernel truncate it silently. It
+  counts what the kernel's buffer gets under UEFI, the worst case: the image
+  name iPXE puts in front (`vmlinuz `, [phase 0](phase0.md)), the cmdline and
+  the terminating NUL. An ed25519 key costs about 90 bytes, an RSA-4096 one
+  about 740, so three of those fill it.
 
 `Cubi.Tools.BootScript` renders the script from a version (or a directory
 URL), a signer directory and ssh public keys: it fetches `SHA256SUMS` for the
-rootfs pin, computes the CA's fingerprint, and reads the keys (default
-`~/.ssh/id_*.pub`). `mix cubi.boot_script` prints it; the provisioning tasks
-(§2.12.4) call the same module.
+rootfs pin (`Cubi.Tools.Image`, so over HTTPS only), computes the CA's
+fingerprint, and reads the keys (default `~/.ssh/id_*.pub`). A script may
+instead name a local server, `http://10.0.2.2:<port>` for a QEMU node, if the
+pins are read from the same image on disk (`--local DIR`).
+`mix cubi.boot_script` prints it, or writes it `0600` with `--output`; the
+provisioning tasks (§2.12.4) call the same module.
 
 #### 2.12.3 `Cubi.Provider`
 
@@ -1314,7 +1321,7 @@ All in `apps/cubi_tools`:
 
 | Task | Does |
 | --- | --- |
-| `mix cubi.boot_script [--image <version\|url>] [--ca <dir>] [--ssh <file>…] [--no-ssh]` | renders the private script to stdout (§2.12.2); on any refusal, exits non-zero and prints nothing on stdout |
+| `mix cubi.boot_script [--image <version\|url>] [--local <dir>] [--ca <dir>] [--ssh <file>…] [--no-ssh] [--cmdline <args>] [--output <file>]` | renders the private script to stdout (§2.12.2); on any refusal, exits non-zero and prints nothing on stdout |
 | `mix cubi.provision <name> --provider <p> [--size] [--region] [--image]` | renders, `create/2`, waits until the instance runs and answers ssh, prints its addresses and the CA fingerprint it pins |
 | `mix cubi.instances [--provider <p>]` | `list/1`: name, status, addresses, image version |
 | `mix cubi.upgrade <name> --image <version>` | `set_script/3` + `reboot/2`, waits for ssh, checks the node reports the new version's firmware UUID (§2.6) |

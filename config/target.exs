@@ -39,26 +39,33 @@ config :logger, :default_handler, false
 # * See https://ssh-subsystem-fwup.hexdocs.pm/readme.html for firmware updates
 
 keys =
-  if config_env() == :e2e do
-    # The e2e firmware trusts the cubi_e2e harness key and nothing else
-    # (docs/testing.md §3). The key is generated locally, never committed.
-    harness_key = Path.expand("../apps/cubi_e2e/priv/harness_key/id_ed25519.pub", __DIR__)
+  cond do
+    # The image the cubi project publishes (docs/specs.md §2.12.1): no key at
+    # all. Logins come from the boot script's cubi.ssh=, read at runtime.
+    config_env() == :public ->
+      []
 
-    if not File.exists?(harness_key),
-      do:
-        Mix.raise("""
-        No harness key at #{harness_key}.
-        Run `mix cubi.e2e.key` first.
-        """)
+    config_env() == :e2e ->
+      # The e2e firmware trusts the cubi_e2e harness key and nothing else
+      # (docs/testing.md §3). The key is generated locally, never committed.
+      harness_key = Path.expand("../apps/cubi_e2e/priv/harness_key/id_ed25519.pub", __DIR__)
 
-    [harness_key]
-  else
-    System.user_home!()
-    |> Path.join(".ssh/id_{rsa,ecdsa,ed25519}.pub")
-    |> Path.wildcard()
+      if not File.exists?(harness_key),
+        do:
+          Mix.raise("""
+          No harness key at #{harness_key}.
+          Run `mix cubi.e2e.key` first.
+          """)
+
+      [harness_key]
+
+    true ->
+      System.user_home!()
+      |> Path.join(".ssh/id_{rsa,ecdsa,ed25519}.pub")
+      |> Path.wildcard()
   end
 
-if keys == [],
+if keys == [] and config_env() != :public,
   do:
     Mix.raise("""
     No SSH public keys found in ~/.ssh. An ssh authorized key is needed to
@@ -80,24 +87,32 @@ config :nerves_ssh,
 # The root CA the node trusts for deployed releases, installed as
 # /etc/cubi/ca.pem in the served rootfs, and the PKI whose signer signs the
 # served images (docs/specs.md §2.11.2, `mix firmware.ipxe`).
-if config_env() == :e2e do
-  # The e2e firmware is signed by the harness's test CA, never the operator's
-  # (docs/testing.md §3). Generated locally, never committed.
-  pki = Path.expand("../apps/cubi_e2e/priv/pki", __DIR__)
+cond do
+  # A public image trusts no CA of its own (docs/specs.md §2.12.1): the boot
+  # script pins one with cubi.ca=. Its signer, the cubi project's, is given
+  # with --signer.
+  config_env() == :public ->
+    :ok
 
-  if not File.exists?(Path.join(pki, "signer.key")),
-    do:
-      Mix.raise("""
-      No test CA in #{pki}.
-      Run `mix cubi.e2e.key` first.
-      """)
+  config_env() == :e2e ->
+    # The e2e firmware is signed by the harness's test CA, never the operator's
+    # (docs/testing.md §3). Generated locally, never committed.
+    pki = Path.expand("../apps/cubi_e2e/priv/pki", __DIR__)
 
-  config :cubi_fw, ca_cert: Path.join(pki, "ca.pem"), signer: pki
-else
-  # The operator's root (`mix cubi.gen_ca`), if there is one. Signing stays an
-  # explicit `--signer`.
-  ca = Path.join(System.get_env("CUBI_PKI_DIR") || Path.expand("~/.cubi/pki"), "ca.pem")
-  if File.exists?(ca), do: config(:cubi_fw, ca_cert: ca)
+    if not File.exists?(Path.join(pki, "signer.key")),
+      do:
+        Mix.raise("""
+        No test CA in #{pki}.
+        Run `mix cubi.e2e.key` first.
+        """)
+
+    config :cubi_fw, ca_cert: Path.join(pki, "ca.pem"), signer: pki
+
+  true ->
+    # The operator's root (`mix cubi.gen_ca`), if there is one. Signing stays an
+    # explicit `--signer`.
+    ca = Path.join(System.get_env("CUBI_PKI_DIR") || Path.expand("~/.cubi/pki"), "ca.pem")
+    if File.exists?(ca), do: config(:cubi_fw, ca_cert: ca)
 end
 
 # Configure the network using vintage_net

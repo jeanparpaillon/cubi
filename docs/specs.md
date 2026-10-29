@@ -942,7 +942,10 @@ releases/<version>/sys.config     build-time configuration
 
 - **`--base`** names a served directory (§2.3), local or at an `https://`
   URL such as a public image's (§2.12.1), from which it reads `base.json`. A
-  URL's `base.json` is checked against the `SHA256SUMS` fetched next to it.
+  URL's `base.json` is checked against the `SHA256SUMS` fetched next to it
+  (`Cubi.Tools.Image`). Only `https://`, the server certificate checked
+  against the system's CAs: HTTPS to the publisher is what vouches for a
+  public image, and sums fetched over plain HTTP would prove nothing.
   `base.json` holds the OTP release, the ERTS version and every application
   with its version in the image. `mix firmware.ipxe` writes that file. The host's OTP
   major must be the image's. Each application of the `mix release` is then
@@ -1188,9 +1191,15 @@ https://…/cubi/<version>/                   rendered by mix cubi.provision,
 #### 2.12.1 Public images
 
 **The public image is generic.** It carries no CA, no ssh key and no signer.
-`mix firmware.ipxe --public` builds it: no `/etc/cubi/ca.pem` (§2.11.2), no
-`nerves_ssh` authorized keys compiled in, and the build fails if either is
-configured. It still writes `base.json` and `SHA256SUMS` (§2.3).
+`MIX_ENV=public mix firmware.ipxe --public` builds it, into
+`_build/<target>_public/ipxe/`: no `/etc/cubi/ca.pem` (§2.11.2), not even the
+signer's, and no `nerves_ssh` authorized keys compiled in. `MIX_ENV=public` is
+the configuration that sets neither; `--public` fails before building if
+either is configured, and checks the built rootfs again
+(`Cubi.Ipxe.check_public!/1`, which also refuses `nerves_ssh` user
+passwords). It still writes `base.json` and `SHA256SUMS` (§2.3), and the
+`.sig` files when given a signer; without one the directory is unsigned, for
+local tests only.
 
 The project publishes one directory per version: `vmlinuz`,
 `stage1.cpio.zst`, `rootfs.squashfs`, `base.json`, `SHA256SUMS`, and the

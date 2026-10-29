@@ -5,10 +5,12 @@ defmodule Mix.Tasks.Cubi.Release do
   `_build/<env>/cubi/<name>-<version>.tar.gz` with its `manifest.json`
   (docs/specs.md §2.11.3, `Cubi.Tools.Release`):
 
-      MIX_ENV=prod mix cubi.release --base DIR [RELEASE]
+      MIX_ENV=prod mix cubi.release --base DIR|URL [RELEASE]
 
-    * `--base DIR` - a served directory (`mix firmware.ipxe`); its
-      `base.json` says what the image ships
+    * `--base DIR|URL` - a served directory (`mix firmware.ipxe`), local or
+      a public image's `https://` URL (docs/specs.md §2.12.1); its
+      `base.json` says what the image ships. A URL's is checked against the
+      `SHA256SUMS` next to it (`Cubi.Tools.Image`)
     * `RELEASE` - the release to build, as for `mix release`
 
   Refuses, listing every reason, when the host's OTP major is not the
@@ -26,8 +28,14 @@ defmodule Mix.Tasks.Cubi.Release do
   @impl Mix.Task
   def run(args) do
     {opts, rest, _} = OptionParser.parse(args, strict: @switches)
-    base_dir = opts[:base] || Mix.raise("--base DIR is required: a `mix firmware.ipxe` directory")
-    base = read_base!(base_dir)
+
+    source =
+      opts[:base] ||
+        Mix.raise(
+          "--base DIR|URL is required: a `mix firmware.ipxe` directory, or its https:// URL"
+        )
+
+    base = read_base!(source)
 
     with {:error, message} <-
            Release.check_otp(base, to_string(:erlang.system_info(:otp_release))),
@@ -72,12 +80,19 @@ defmodule Mix.Tasks.Cubi.Release do
     end
   end
 
-  defp read_base!(dir) do
-    path = Path.join(dir, "base.json")
+  defp read_base!(source) do
+    case Cubi.Tools.Image.base(source) do
+      {:ok, base} ->
+        base
 
-    case File.read(path) do
-      {:ok, data} -> JSON.decode!(data)
-      {:error, _} -> Mix.raise("no #{path}: --base names a `mix firmware.ipxe` directory")
+      {:error, {:not_https, url}} ->
+        Mix.raise("--base #{url}: only https:// URLs, HTTPS is what vouches for the image")
+
+      {:error, {:fetch_failed, where, :enoent}} ->
+        Mix.raise("no #{where}: --base names a `mix firmware.ipxe` directory")
+
+      {:error, reason} ->
+        Mix.raise("--base #{source}: #{inspect(reason)}")
     end
   end
 

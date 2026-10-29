@@ -6,6 +6,7 @@ defmodule Mix.Tasks.Firmware.Ipxe do
   `_build/<target>_<env>/ipxe/` (docs/specs.md §2.3, §2.11.2, `Cubi.Ipxe`).
 
       MIX_TARGET=x86_64 mix firmware.ipxe [--cmdline "console=ttyS0 …"] [--signer DIR] [--imgverify]
+      MIX_TARGET=x86_64 MIX_ENV=public mix firmware.ipxe --public [--signer DIR]
 
     * `--signer DIR` - a PKI directory (`mix cubi.gen_ca`): its signer
       writes `vmlinuz.sig`, `stage1.cpio.zst.sig` and `rootfs.squashfs.sig`.
@@ -21,20 +22,34 @@ defmodule Mix.Tasks.Firmware.Ipxe do
   `ca.pem`. If both are set they must be the same certificate. With neither,
   the node refuses every release.
 
+  **`--public`** builds the generic image the cubi project publishes
+  (docs/specs.md §2.12.1): no `/etc/cubi/ca.pem`, not even the signer's, and
+  no `nerves_ssh` authorized keys. It refuses to start if `config :cubi_fw,
+  :ca_cert` or `config :nerves_ssh, :authorized_keys` is set, which
+  `MIX_ENV=public` leaves out, and checks the built rootfs again
+  (`Cubi.Ipxe.check_public!/1`). The signer, the project's, is optional:
+  without one the directory is unsigned, fine for local tests and not for
+  publishing.
+
   Run it in a Nerves firmware project whose system ships
   `images/stage1.cpio.zst` (`cubi_system_x86_64`). Needs `fwup`,
   `unsquashfs`, `mksquashfs` and, to sign, `openssl` on the host.
   """
   use Mix.Task
 
-  @switches [cmdline: :string, signer: :string, imgverify: :boolean]
+  @switches [cmdline: :string, signer: :string, imgverify: :boolean, public: :boolean]
 
   @impl Mix.Task
   def run(args) do
     {opts, _, _} = OptionParser.parse(args, strict: @switches)
+    public = opts[:public] || false
 
-    signer = signer(opts[:signer] || Application.get_env(:cubi_fw, :signer))
-    ca_cert = trusted_ca(Application.get_env(:cubi_fw, :ca_cert), signer)
+    if public, do: check_public_config!()
+
+    signer = signer(opts[:signer] || Application.get_env(:cubi_fw, :signer), public)
+
+    ca_cert =
+      if public, do: nil, else: trusted_ca(Application.get_env(:cubi_fw, :ca_cert), signer)
 
     if opts[:imgverify] && signer == nil,
       do: Mix.raise("--imgverify needs a signer: the script would refuse every image")
@@ -53,15 +68,40 @@ defmodule Mix.Tasks.Firmware.Ipxe do
         otp_version: otp_version!(system),
         ca_cert: ca_cert,
         signer: signer,
-        imgverify: opts[:imgverify] || false
+        imgverify: opts[:imgverify] || false,
+        public: public
       )
 
     Mix.shell().info("""
     #{meta["product"]} #{meta["version"]} (#{meta["uuid"]}) ready to serve in
       #{Path.relative_to_cwd(output)}
-    #{if signer, do: "signed by #{signer}", else: "UNSIGNED"}; releases trusted from #{ca_cert || "nobody"}
+    #{if signer, do: "signed by #{signer}", else: "UNSIGNED"}; #{trust(public, ca_cert)}
     """)
   end
+
+  defp trust(true, _), do: "public: CA and ssh keys come from the boot script's cmdline"
+  defp trust(false, ca_cert), do: "releases trusted from #{ca_cert || "nobody"}"
+
+  # Checked before `mix firmware`, so a misconfigured public build fails in
+  # seconds; Cubi.Ipxe checks the result again.
+  defp check_public_config!() do
+    if ca = Application.get_env(:cubi_fw, :ca_cert),
+      do: Mix.raise("--public: config :cubi_fw, :ca_cert is set (#{ca}); use MIX_ENV=public")
+
+    if Application.get_env(:nerves_ssh, :authorized_keys, []) != [],
+      do: Mix.raise("--public: config :nerves_ssh, :authorized_keys is set; use MIX_ENV=public")
+  end
+
+  defp signer(nil, true) do
+    Mix.shell().info([
+      :yellow,
+      "No signer: the public directory is unsigned, not for publishing."
+    ])
+
+    nil
+  end
+
+  defp signer(dir, _public), do: signer(dir)
 
   defp signer(nil) do
     if Mix.env() != :dev,

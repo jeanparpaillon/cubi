@@ -20,7 +20,8 @@ defmodule Cubi.Tools.MixProject do
   # it with `runtime: false`; never part of a release.
   def application do
     [
-      extra_applications: [:logger]
+      # :inets and :ssl: `--base https://…` (Cubi.Tools.Image).
+      extra_applications: [:logger, :inets, :ssl]
     ]
   end
 

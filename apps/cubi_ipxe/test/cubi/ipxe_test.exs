@@ -146,6 +146,42 @@ defmodule Cubi.IpxeTest do
     end
   end
 
+  describe "check_public!/1" do
+    @describetag :tmp_dir
+
+    defp rootfs(root, ssh) do
+      release = Path.join(root, "srv/erlang/releases")
+      File.mkdir_p!(Path.join(release, "0.1.0"))
+      File.write!(Path.join(release, "start_erl.data"), "17.0.2 0.1.0\n")
+      config = [kernel: [], nerves_ssh: ssh]
+      File.write!(Path.join(release, "0.1.0/sys.config"), :io_lib.format(~c"~p.~n", [config]))
+      root
+    end
+
+    test "no CA and no ssh login passes", %{tmp_dir: tmp} do
+      assert Cubi.Ipxe.check_public!(rootfs(tmp, authorized_keys: [], subsystems: [])) == :ok
+      assert Cubi.Ipxe.check_public!(rootfs(tmp, [])) == :ok
+    end
+
+    test "an authorized key or a password is refused", %{tmp_dir: tmp} do
+      assert_raise RuntimeError, ~r/authorized_keys.*MIX_ENV=public/, fn ->
+        Cubi.Ipxe.check_public!(rootfs(tmp, authorized_keys: ["ssh-ed25519 AAAA"]))
+      end
+
+      assert_raise RuntimeError, ~r/user_passwords/, fn ->
+        Cubi.Ipxe.check_public!(rootfs(tmp, user_passwords: [{"root", "x"}]))
+      end
+    end
+
+    test "a CA in the rootfs is refused", %{tmp_dir: tmp} do
+      root = rootfs(tmp, [])
+      File.mkdir_p!(Path.join(root, "etc/cubi"))
+      File.write!(Path.join(root, "etc/cubi/ca.pem"), "x")
+
+      assert_raise RuntimeError, ~r/etc\/cubi\/ca.pem/, fn -> Cubi.Ipxe.check_public!(root) end
+    end
+  end
+
   describe "trusted_ca!/2" do
     test "no CA and no signer: nothing trusted" do
       assert Cubi.Ipxe.trusted_ca!(nil, nil) == nil

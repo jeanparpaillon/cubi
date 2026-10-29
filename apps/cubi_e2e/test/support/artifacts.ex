@@ -37,6 +37,24 @@ defmodule Cubi.E2E.Artifacts do
   @spec rootfs!() :: Path.t()
   def rootfs!(), do: served!("rootfs.squashfs")
 
+  @doc """
+  The public directory (docs/specs.md §2.12.1), `_build/x86_64_public/ipxe/`,
+  from `MIX_TARGET=x86_64 MIX_ENV=public mix firmware.ipxe --public` in
+  apps/cubi_fw: no CA and no ssh key, configured by the cmdline.
+  """
+  @spec public_dir!() :: Path.t()
+  def public_dir!() do
+    dir = Path.join([root(), "_build", "x86_64_public", "ipxe"])
+
+    if not File.exists?(Path.join(dir, "rootfs.squashfs")),
+      do:
+        raise(
+          "no #{dir}: run `MIX_TARGET=x86_64 MIX_ENV=public mix firmware.ipxe --public` in apps/cubi_fw"
+        )
+
+    dir
+  end
+
   @doc "The served directory itself (`mix firmware.ipxe`'s output)."
   @spec served_dir!() :: Path.t()
   def served_dir!() do

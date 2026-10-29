@@ -29,6 +29,11 @@ defmodule Cubi.Ipxe do
       certificate the node checks deployed releases against (§2.11.2). The
       rootfs signature then covers it.
 
+  **A public image** (`public: true`, docs/specs.md §2.12.1) is the generic
+  one the cubi project publishes: no `/etc/cubi/ca.pem` and no way in compiled
+  into the release (`check_public!/1`). The operator's configuration comes
+  from the cmdline instead (§2.12.2).
+
   **`base.json`** describes the image to the tools that build releases for it
   (§2.11.3): the OTP and ERTS versions, and every application in the rootfs's
   `/srv/erlang/lib` with its version.
@@ -63,6 +68,9 @@ defmodule Cubi.Ipxe do
     * `:signer` - PKI directory (`Cubi.Pki`) whose signer signs the images
     * `:imgverify` - write the `imgverify` lines into `boot.ipxe` (§2.11.2);
       needs `:signer`
+    * `:public` - build the generic image of §2.12.1: no `:ca_cert` allowed,
+      and the rootfs is refused by `check_public!/1` if it holds a CA or an
+      ssh login
 
   Returns the metadata read from the `.fw`.
   """
@@ -76,8 +84,10 @@ defmodule Cubi.Ipxe do
     ca_cert = Keyword.get(opts, :ca_cert)
     signer = Keyword.get(opts, :signer)
     imgverify = Keyword.get(opts, :imgverify, false)
+    public = Keyword.get(opts, :public, false)
 
     if imgverify and signer == nil, do: raise(ArgumentError, ":imgverify needs a :signer")
+    if public and ca_cert, do: raise(ArgumentError, "a :public image carries no :ca_cert")
 
     for path <- [fw, stage1 | List.wrap(ca_cert)], not File.exists?(path), do: raise("no #{path}")
 
@@ -95,6 +105,7 @@ defmodule Cubi.Ipxe do
     File.write!(Path.join(output, "vmlinuz"), kernel)
 
     root = unpack_rootfs!(original, work)
+    if public, do: check_public!(root)
     base = base(root, otp_version, meta)
     added = add_files!(root, kv(meta), ca_cert)
     repack_rootfs!(original, root, Path.join(output, "rootfs.squashfs"), added, work)
@@ -144,6 +155,41 @@ defmodule Cubi.Ipxe do
 
   defp der(path),
     do: path |> File.read!() |> X509.Certificate.from_pem!() |> X509.Certificate.to_der()
+
+  @doc """
+  Raises unless the unpacked rootfs at `root` is fit to publish (§2.12.1): no
+  `/etc/cubi/ca.pem`, and no ssh login in the release's `sys.config`, neither
+  `nerves_ssh` authorized keys nor user passwords. Whoever writes the boot
+  script decides those, never the image.
+  """
+  @spec check_public!(Path.t()) :: :ok
+  def check_public!(root) do
+    if File.exists?(Path.join(root, @ca_path)),
+      do: raise("a public image must not carry /#{@ca_path}")
+
+    ssh = root |> sys_config!() |> Keyword.get(:nerves_ssh, [])
+
+    for key <- [:authorized_keys, :user_passwords], Keyword.get(ssh, key, []) not in [[], nil] do
+      raise "a public image must not carry nerves_ssh #{key}: " <>
+              "build it with MIX_ENV=public, which configures none"
+    end
+
+    :ok
+  end
+
+  defp sys_config!(root) do
+    erlang = Path.join(root, "srv/erlang")
+
+    [_erts, release_version] =
+      erlang |> Path.join("releases/start_erl.data") |> File.read!() |> String.split()
+
+    path = Path.join([erlang, "releases", release_version, "sys.config"])
+
+    case :file.consult(path) do
+      {:ok, [config]} -> config
+      other -> raise "cannot read #{path}: #{inspect(other)}"
+    end
+  end
 
   @doc """
   `base.json` for an unpacked rootfs at `root` (§2.11.3).

@@ -126,8 +126,11 @@ shell that `rdinit=` can reach ([security.md](security.md) §5). Its whole job:
 1. Mount `proc`, `sys`, `devtmpfs`.
 2. If the cmdline has `cubi.rootfs=sha256:<hex>`, check `/rootfs.squashfs`
    against it (busybox `sha256sum`); a mismatch is a failure,
-   `cubi stage-1: rootfs hash mismatch`. Without the argument there is no
-   check, and a warning on the console (§2.12.2).
+   `cubi stage-1: rootfs hash mismatch`. The last occurrence counts, as for
+   the kernel's own parameters. A malformed pin (another algorithm, anything
+   but 64 lowercase hex digits, an empty value) is a failure too, never a
+   skipped check. Without the argument there is no check, and a warning on
+   the console (§2.12.2).
 3. `losetup` + mount `/rootfs.squashfs` read-only on `/newroot`.
 4. Mount a tmpfs on `/newroot/root` (`mode=0700,nodev,nosuid`). Persistence is
    not stage-1's concern: cubi imports its ZFS pool from BEAM (§2.10.3).

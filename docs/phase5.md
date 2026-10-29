@@ -5,7 +5,7 @@ Part of the cubi node boot plan: design in [specs.md](specs.md), open questions 
 - [ ] Custom iPXE build with HTTPS, embedded CA and `imgverify`. The embedded CA and `imgverify` are done in [milestone 1](milestone1.md) (`mix cubi.ipxe`); HTTPS remains, with the boot server's certificate under the same root ([§2.11.2](specs.md)).
 - [ ] Per-node scripts selected by `${uuid}`.
 - [ ] dnsmasq proxy-DHCP config.
-- [ ] Stage-1 as a small static C program, and no busybox in the initramfs ([security.md](security.md) §5).
+- [ ] Stage-1 as a small static C program, and no busybox in the initramfs ([security.md](security.md) §5). It keeps the `cubi.rootfs=sha256:` check of [§2.4](specs.md) step 2, with the same messages, so `apps/cubi_e2e/test/milestone2_rootfs_pin_test.exs` passes unchanged.
 - [ ] Harness, tier 2: `Sandbox` (namespace, bridge, dnsmasq, boot server, NTP, pcap) and the boot server's misbehave modes ([testing.md](testing.md) §4.2).
 
 **Acceptance:**

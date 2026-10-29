@@ -48,7 +48,23 @@ defmodule Mix.Tasks.Cubi.BootScript do
   @impl Mix.Task
   def run(args) do
     {opts, _, _} = OptionParser.parse(args, strict: @switches)
+    script = render!(opts)
 
+    if output = opts[:output] do
+      File.write!(output, script)
+      File.chmod!(output, 0o600)
+    else
+      IO.write(script)
+    end
+  end
+
+  @doc false
+  # The switches that choose what the script says, shared with
+  # `mix cubi.provision` and `mix cubi.upgrade`.
+  def script_switches(), do: Keyword.delete(@switches, :output)
+
+  @doc false
+  def render!(opts) do
     render_opts =
       [
         image: image!(opts[:image]),
@@ -59,16 +75,8 @@ defmodule Mix.Tasks.Cubi.BootScript do
       ] ++ if(opts[:local], do: [local: opts[:local]], else: [])
 
     case BootScript.render(render_opts) do
-      {:ok, script} ->
-        if output = opts[:output] do
-          File.write!(output, script)
-          File.chmod!(output, 0o600)
-        else
-          IO.write(script)
-        end
-
-      {:error, reason} ->
-        Mix.raise("cannot render the boot script: #{message(reason)}")
+      {:ok, script} -> script
+      {:error, reason} -> Mix.raise("cannot render the boot script: #{message(reason)}")
     end
   end
 

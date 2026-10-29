@@ -101,6 +101,8 @@ defmodule Cubi.E2E.Milestone2PublicImageTest do
 
     # Built against the public base.json, signed with the test CA: ca.pem inside.
     v1 = Hello.build!("0.1.0", :ok, context.public)
+    # Up and answering ssh before the deploy, however fast the build was.
+    assert Node.eval(vm, ":ok") == :ok
     {out, status} = Hello.deploy(vm, v1)
     assert status == 0, out
     assert out =~ "ok hello 0.1.0"

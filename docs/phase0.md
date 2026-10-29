@@ -9,12 +9,17 @@ Part of the cubi node boot plan: design in [specs.md](specs.md), open questions 
 - [x] Buildroot `zfs` package in `nerves_system_br` 1.34.0, and the squashfs size with it ([§2.10.5](specs.md)).
 - [x] `/dev/disk/by-id` absent under Nerves; `spl_hostid` keeps imports `-f`-free across reboots ([§2.10.3](specs.md)).
 - [ ] Test infrastructure ([testing.md](testing.md) §4.2, §6, §8): AppArmor profile for unprivileged user namespaces, KVM inside the namespace, ACPI power button handling in Nerves, `/dev/kvm` on CI runners.
-- [x] Khepri 0.19 projections, and `verify_fun` as `{M, F, State}` in the `inet_tls_dist` options file ([§2.9.4](specs.md)).
+- [x] Khepri 0.19 projections, and `verify_fun` as `{M, F, State}` in the `inet_tls_dist` options file ([cluster.md §3.4](cluster.md)).
 - [x] iPXE `imgverify` with a `TRUST=` build accepts an RSA-3072 signer with `codeSigning`, and which key types it accepts besides RSA ([§2.11.1](specs.md)). From the v2.0.0 source: RSA and ECDSA P-256/P-384, `codeSigning` required (`crypto/cms.c`). Confirmed by `apps/cubi_e2e/test/milestone1_imgverify_test.exs` on 2026-10-28, with `CERT=` the root as well: `TRUST=` alone gives "No usable certificates".
 - [x] shoehorn 0.9 calls its handler's `application_exited/3` for an application started with `Application.ensure_all_started/2` after boot, not only for its `init`/`app` list ([§2.11.7](specs.md)). Confirmed on 2026-10-28 by `apps/cubi_e2e/test/milestone1_deploy_node_test.exs`: a deployed `cubi_hello` killed on the node is rolled back. It goes through a primary `logger` filter, so it depends on the log level letting `:notice` through.
 - [ ] Stock iPXE (QEMU's ROM, Ubuntu's `ipxe.efi`, the clouds' own) fetches over HTTPS from a public web-PKI host, through its cross-signed root and `ca.ipxe.org`, and follows the redirects of the host chosen for the public images ([milestone 2](milestone2.md)).
 - [ ] Vultr's API stores a `pxe` startup script and boots a new instance from its content, under BIOS or UEFI; what it requires to change that script on a running instance ([milestone 2](milestone2.md)).
-- [ ] The ipxe.org EC2 image runs the instance's user data as its script ([milestone 2](milestone2.md)).
+- [ ] The ipxe.org EC2 image runs the instance's user data as its script, under BIOS and UEFI, and whether it needs IMDSv1 (`HttpTokens=optional`) ([milestone 4](milestone4.md)).
+- [ ] An iPXE built from its cloud configuration, uploaded to OVHcloud Public Cloud's Glance, fetches `http://169.254.169.254/latest/user-data` from OpenStack's metadata service; a Nova rebuild (microversion ≥ 2.57) replaces that user data ([milestone 4](milestone4.md)).
+- [ ] The stage-1 cpio boots under another kernel version than the one it was built with, given `squashfs`, `loop`, `devtmpfs` and `tmpfs` built in ([systems.md](systems.md)).
+- [ ] An app `rootfs_overlay` replaces the system's `/etc/erlinit.config`; `nerves_runtime`'s init formats no disk on a diskless node whose seeded KV names an application partition ([systems.md](systems.md)).
+- [ ] `nerves_system_vultr`'s `.fw` keeps the kernel at `/boot/bzImage` in the rootfs; Vultr creates a snapshot from a raw image URL ([systems.md](systems.md)).
+- [ ] OVH's API stores an iPXE script (`/me/ipxeScript`) and netboots a dedicated server from it; an OAuth2 service account and IAM resource tags work on `/dedicated/server`; which tty the IPMI SOL console is ([milestone 4](milestone4.md)).
 
 ## Results
 
@@ -163,7 +168,7 @@ nodes:
 - The callback is arity 3 (`OtpCert, Event, State`), so `decide/2` needs a thin
   wrapper. The subject CN arrives as a UTF-8 binary.
 
-[§2.9.4](specs.md) is corrected.
+[cluster.md §3.4](cluster.md) is corrected.
 
 **Test infrastructure: two of four confirmed, the rest blocked on a decision.**
 

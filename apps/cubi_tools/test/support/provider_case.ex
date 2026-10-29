@@ -87,6 +87,29 @@ defmodule Cubi.Provider.Case do
           assert {:ok, %Instance{id: ^id}} = mod.get(state, spec.name)
         end
 
+        test "the instance reports the image of its script, before and after set_script/3",
+             context do
+          {mod, state} = start!(context)
+          spec = spec(context, "a")
+          v1 = "#!ipxe\nset base https://images.example/cubi/0.1.0\n" <> spec.script
+
+          assert {:ok, instance} = mod.create(state, %{spec | script: v1})
+
+          assert {:ok, %Instance{image: "https://images.example/cubi/0.1.0"}} =
+                   mod.get(state, spec.name)
+
+          v2 = String.replace(v1, "0.1.0", "0.2.0")
+          assert :ok = mod.set_script(state, instance, v2)
+
+          assert {:ok, %Instance{image: "https://images.example/cubi/0.2.0"}} =
+                   mod.get(state, spec.name)
+
+          assert {:ok, listed} = mod.list(state)
+
+          assert [%Instance{image: "https://images.example/cubi/0.2.0"}] =
+                   Enum.filter(listed, &(&1.name == spec.name))
+        end
+
         test "destroy/2 removes it from list/1 and get/2, and leaves the others", context do
           {mod, state} = start!(context)
           a = spec(context, "a")

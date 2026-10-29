@@ -92,6 +92,20 @@ defmodule Cubi.Tools.BootScript do
     end
   end
 
+  @doc ~S"""
+  The image a script boots: the URL of its `set base` line, or `nil`.
+
+      iex> Cubi.Tools.BootScript.image_of("#!ipxe\nset base https://x/cubi/0.2.0\nboot\n")
+      "https://x/cubi/0.2.0"
+  """
+  @spec image_of(String.t()) :: String.t() | nil
+  def image_of(script) do
+    case Regex.run(~r/^set base (\S+)\s*$/m, script) do
+      [_, url] -> url
+      nil -> nil
+    end
+  end
+
   @doc "How many bytes of the kernel's buffer `cmdline` takes, counted as `render/1` does."
   @spec cmdline_bytes(String.t()) :: non_neg_integer()
   def cmdline_bytes(cmdline), do: byte_size(@uefi_prefix) + byte_size(cmdline) + 1

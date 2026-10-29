@@ -6,8 +6,13 @@ defmodule Mix.Tasks.Cubi.Deploy do
 
       mix cubi.deploy NODE [ARCHIVE] [--port N] [--user U] [--identity FILE]
                                      [--ssh-option OPT ...]
+      mix cubi.deploy NAME [ARCHIVE] --provider P [--user U] [--identity FILE] …
 
     * `ARCHIVE` - default the newest `_build/<env>/cubi/*.tar.gz`
+    * `--provider P` - `NAME` is an instance of that provider
+      (docs/specs.md §2.12.4): its address and ssh port come from the
+      provider, and host key checking is off, since a diskless node has a
+      new host key at every boot (`Cubi.Tools.Ssh`)
     * `--port`, `--user`, `--identity` - passed to `ssh` as `-p`, `-l`, `-i`
     * `--ssh-option OPT` - passed as `-o OPT`; repeatable
 
@@ -19,7 +24,13 @@ defmodule Mix.Tasks.Cubi.Deploy do
   """
   use Mix.Task
 
-  @switches [port: :integer, user: :string, identity: :string, ssh_option: :keep]
+  @switches [
+    port: :integer,
+    user: :string,
+    identity: :string,
+    ssh_option: :keep,
+    provider: :string
+  ]
 
   @impl Mix.Task
   def run(args) do
@@ -34,6 +45,8 @@ defmodule Mix.Tasks.Cubi.Deploy do
 
     if not File.regular?(archive), do: Mix.raise("no #{archive}")
     check_signed!(archive)
+
+    {node, opts} = if opts[:provider], do: via_provider(node, opts), else: {node, opts}
 
     Mix.shell().info("Deploying #{Path.relative_to_cwd(archive)} to #{node}")
     {lines, status} = stream(archive, ssh_args(node, opts))
@@ -53,6 +66,17 @@ defmodule Mix.Tasks.Cubi.Deploy do
     extra = opts |> Keyword.get_values(:ssh_option) |> Enum.flat_map(&["-o", &1])
 
     port ++ user ++ identity ++ extra ++ ["-s", node, "cubi_deploy"]
+  end
+
+  @doc false
+  # The instance's address and ssh port, from its provider.
+  def via_provider(name, opts) do
+    provider = Cubi.Tools.ProviderTask.provider!(opts[:provider])
+
+    target =
+      provider |> Cubi.Tools.ProviderTask.instance!(name) |> Cubi.Tools.ProviderTask.target()
+
+    {target.host, Keyword.put(Cubi.Tools.ProviderTask.ssh_opts(opts), :port, target.port)}
   end
 
   # An Erlang port cannot close ssh's stdin without closing its stdout too, so

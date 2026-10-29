@@ -7,11 +7,14 @@ defmodule Cubi.Provider.Instance do
     * `status` - `:pending` (being created or booting), `:running`,
       `:stopped`, or `:unknown` for anything the provider reports otherwise
     * `addresses` - IP addresses as strings, public ones first
-    * `provider` - whatever else the provider module keeps about it
+    * `image` - the image its stored script boots, the URL of its `set base`
+      line (`Cubi.Tools.BootScript.image_of/1`), `nil` without one
+    * `provider` - whatever else the provider module keeps about it; an
+      `ssh_port` there replaces 22 (`Cubi.Tools.ProviderTask`)
   """
 
   @enforce_keys [:id, :name, :status]
-  defstruct [:id, :name, :status, addresses: [], provider: %{}]
+  defstruct [:id, :name, :status, image: nil, addresses: [], provider: %{}]
 
   @type status :: :pending | :running | :stopped | :unknown
 
@@ -20,6 +23,7 @@ defmodule Cubi.Provider.Instance do
           name: String.t(),
           status: status(),
           addresses: [String.t()],
+          image: String.t() | nil,
           provider: map()
         }
 end

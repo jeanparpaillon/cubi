@@ -37,6 +37,7 @@ defmodule Cubi.Provider.Fake do
         name: spec.name,
         status: :running,
         addresses: ["192.0.2.1"],
+        image: Cubi.Tools.BootScript.image_of(spec.script),
         provider: %{script: spec.script, firmware: spec.firmware, reboots: 0}
       }
 
@@ -58,7 +59,15 @@ defmodule Cubi.Provider.Fake do
   end
 
   @impl true
-  def set_script(state, instance, script), do: update(state, instance, &%{&1 | script: script})
+  def set_script(state, %Instance{name: name}, script) do
+    with {:ok, instance} <- get(state, name) do
+      write!(path(state, name), %{
+        instance
+        | image: Cubi.Tools.BootScript.image_of(script),
+          provider: %{instance.provider | script: script}
+      })
+    end
+  end
 
   @impl true
   def reboot(state, instance), do: update(state, instance, &%{&1 | reboots: &1.reboots + 1})

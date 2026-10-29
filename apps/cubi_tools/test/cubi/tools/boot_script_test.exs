@@ -3,6 +3,8 @@ defmodule Cubi.Tools.BootScriptTest do
 
   alias Cubi.Tools.BootScript
 
+  doctest BootScript
+
   @moduletag :tmp_dir
 
   setup_all do

@@ -211,12 +211,16 @@ Each phase ends with an acceptance test, automated as described in
 | [6](docs/phase6.md) | Storage: ZFS and Khepri |
 | [M1](docs/milestone1.md) | Signed releases deployed to standalone nodes, no distribution |
 | [M2](docs/milestone2.md) | Cloud instances from public images, a private iPXE script and `Cubi.Provider` |
+| [M3](docs/milestone3.md) | Dress it for release: format, credo, dialyzer, docs |
+| [M4](docs/milestone4.md) | More providers: EC2, OVHcloud Public Cloud and bare metal |
 | [7](docs/phase7.md) | Plug into cubi: join, leave, membership |
 | [8](docs/phase8.md) | Real hardware |
 
 ## Documentation
 
 - [docs/architecture.md](docs/architecture.md): the cluster manager design (join, leave, membership, security)
-- [docs/specs.md](docs/specs.md): node boot specification (iPXE, stage-1 init, credentials, Khepri, ZFS)
+- [docs/specs.md](docs/specs.md): node specification (iPXE, stage-1 init, ZFS, signed releases, cloud instances)
+- [docs/cluster.md](docs/cluster.md): the cluster layer on top of it (tokens, join, NervesHub reuse, Khepri, the cluster ZFS key)
+- [docs/systems.md](docs/systems.md): stock Nerves systems vs cubi's fork, diskless and disk boot modes
 - [docs/questions.md](docs/questions.md): open questions
 - [docs/testing.md](docs/testing.md): test strategy and harness

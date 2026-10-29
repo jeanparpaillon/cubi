@@ -32,7 +32,7 @@ from ExUnit. It is not part of any firmware.
 | `Cubi.E2E.Sandbox` | Tier 2's network namespace: bridge, taps, dnsmasq, boot server, NTP, packet capture (§4.2) |
 | `Cubi.E2E.Disk` | qcow2 fixtures: blank, pre-partitioned ("dirty"), and pools carried over between boots (§5). `restart_vm!/2` in the case template power-cycles a machine onto the same disks |
 | `Cubi.E2E.Cluster` | N-VM fixture with helpers: `bootstrap/2` (drives the OTP page), `boot_storage/2`, `boot_diskless/2`, `restart_all/1`, `voters/1` |
-| `Cubi.E2E.Leak` | Scans every serial log, the packet capture and each guest's `/root` for every secret the test minted: masters, node tokens, OTPs and the ZFS key ([specs §2.8.5](specs.md), [§2.10.4](specs.md)). For the ZFS key it also scans the raw disk images |
+| `Cubi.E2E.Leak` | Scans every serial log, the packet capture and each guest's `/root` for every secret the test minted: masters, node tokens, OTPs and the ZFS key ([cluster.md §2.5](cluster.md), [cluster.md §5](cluster.md)). For the ZFS key it also scans the raw disk images |
 
 Each test gets its own directory under `_build/e2e/<module>/<test>/`, holding
 disks, logs (`console.log`, `qmp.log`), the QEMU argv and the capture. It is
@@ -197,7 +197,7 @@ qemu-system-x86_64 -machine q35,accel=kvm -cpu host -m 1024 -nographic \
 | freeze (GC pause, overloaded host) | QMP `stop`, then `cont` |
 | whole-cluster restart | `Cubi.E2E.Cluster.restart_all/1`: kill every VM, keep their disks |
 | disk loss | QMP `blockdev-del`, or a restart with a new blank disk |
-| wrong clock | `rtc: {:skew, …}` with the sandbox NTP stopped. The NH1 join must fail with a console message ([specs §2.9.4](specs.md)) |
+| wrong clock | `rtc: {:skew, …}` with the sandbox NTP stopped. The NH1 join must fail with a console message ([cluster.md §3.4](cluster.md)) |
 | tampered or wrong artifacts | the boot server's misbehave modes (§4.2) |
 
 ## 7. Acceptance → tests

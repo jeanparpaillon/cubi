@@ -160,6 +160,11 @@ defmodule Cubi.Provider.Qemu do
       name: name,
       status: if(pid(dir), do: :running, else: :stopped),
       addresses: ["127.0.0.1"],
+      image:
+        case File.read(Path.join([dir, "tftp", "boot.ipxe"])) do
+          {:ok, script} -> Cubi.Tools.BootScript.image_of(script)
+          {:error, _} -> nil
+        end,
       provider: %{
         dir: dir,
         firmware: String.to_existing_atom(record["firmware"]),

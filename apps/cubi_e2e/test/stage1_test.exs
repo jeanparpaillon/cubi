@@ -1,6 +1,6 @@
 defmodule Cubi.E2E.Stage1Test do
   @moduledoc """
-  Stage-1's own behaviour (docs/specs.md §2.4, §2.8.2; docs/security.md §5):
+  Stage-1's own behaviour (docs/specs.md §2.4, docs/cluster.md §2.2; docs/security.md §5):
   the token is carried into `/root`, erlinit starts with a clean environment
   whatever the cmdline says, and a failure reboots a production image but
   drops a dev image to a shell.

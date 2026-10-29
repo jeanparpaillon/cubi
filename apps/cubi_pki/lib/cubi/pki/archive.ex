@@ -116,15 +116,22 @@ defmodule Cubi.Pki.Archive do
 
   @doc """
   Adds `manifest.sig` and `signer.pem` for `signer` (`Cubi.Pki.load_signer!/1`),
-  replacing any previous signature. Refuses an archive whose files do not match
-  its manifest: signing would vouch for them.
+  and `ca.pem` when given the signer's root as `ca:` (its PEM), replacing any
+  previous signature and root: an archive re-signed under another root never
+  keeps the old one. Refuses an archive whose files do not match its manifest:
+  signing would vouch for them.
   """
-  @spec sign(entries(), Cubi.Pki.signer()) :: {:ok, entries()} | {:error, term()}
-  def sign(entries, signer) do
+  @spec sign(entries(), Cubi.Pki.signer(), keyword()) :: {:ok, entries()} | {:error, term()}
+  def sign(entries, signer, opts \\ []) do
     with {:ok, manifest} <- manifest(entries),
          :ok <- check_files(entries, manifest) do
       {signature, pem} = Cubi.Pki.sign(entries[@manifest], signer)
-      {:ok, Map.merge(entries, %{@signature => signature, @signer => pem})}
+      signed = entries |> Map.drop([@ca]) |> Map.merge(%{@signature => signature, @signer => pem})
+
+      case Keyword.get(opts, :ca) do
+        nil -> {:ok, signed}
+        ca -> {:ok, Map.put(signed, @ca, ca)}
+      end
     end
   end
 

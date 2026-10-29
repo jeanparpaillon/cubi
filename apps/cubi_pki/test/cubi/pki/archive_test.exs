@@ -118,6 +118,21 @@ defmodule Cubi.Pki.ArchiveTest do
       assert Archive.read!(path) == with_ca
     end
 
+    test "sign/3 adds the root given as ca:, and drops an older one without it", %{
+      pki: pki,
+      other: other
+    } do
+      {:ok, signed} = Archive.sign(entries(), Pki.load_signer!(other), ca: ca(other))
+      assert Archive.ca(signed) == ca(other)
+
+      {:ok, resigned} = Archive.sign(signed, Pki.load_signer!(pki), ca: ca(pki))
+      assert Archive.ca(resigned) == ca(pki)
+      assert {:ok, _} = Archive.verify(resigned, ca(pki))
+
+      {:ok, bare} = Archive.sign(signed, Pki.load_signer!(pki))
+      assert Archive.ca(bare) == nil
+    end
+
     test "sign/2 refuses files that do not match the manifest", %{pki: pki} do
       assert {:error, {:hash_mismatch, _}} =
                Archive.sign(Map.put(entries(), "lib/a-1/priv/x", "y"), Pki.load_signer!(pki))

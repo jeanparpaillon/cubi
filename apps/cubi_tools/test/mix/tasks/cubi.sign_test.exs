@@ -38,24 +38,28 @@ defmodule Mix.Tasks.Cubi.SignTest do
 
   defp ca(dir), do: File.read!(Cubi.Pki.paths(dir).ca_cert)
 
-  test "adds manifest.sig and signer.pem, which verify against the root", context do
+  test "adds manifest.sig, signer.pem and the root as ca.pem, which verify against it", context do
     Sign.run([context.archive, "--signer", context.pki])
 
     assert_received {:mix_shell, :info, [out]}
     assert out =~ "hello 0.1.0 signed"
     assert out =~ Cubi.Pki.ca_fingerprint(context.pki)
+    {:ok, hex} = Cubi.Pki.cert_sha256(ca(context.pki))
+    assert out =~ "cubi.ca=sha256:#{hex}"
 
     entries = Archive.read!(context.archive)
+    assert Archive.ca(entries) == ca(context.pki)
     assert {:ok, %{"name" => "hello"}} = Archive.verify(entries, ca(context.pki))
     assert {:error, {:bad_signer_chain, _}} = Archive.verify(entries, ca(context.other))
   end
 
-  test "signing again replaces the signature and the signer", context do
+  test "signing again replaces the signature, the signer and the root", context do
     Sign.run([context.archive, "--signer", context.other])
     Sign.run([context.archive, "--signer", context.pki])
 
     entries = Archive.read!(context.archive)
     assert {:ok, _} = Archive.verify(entries, ca(context.pki))
+    assert Archive.ca(entries) == ca(context.pki)
     assert entries |> Map.keys() |> Enum.count(&(&1 == "manifest.sig")) == 1
   end
 

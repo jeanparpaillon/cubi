@@ -1,8 +1,10 @@
 defmodule Mix.Tasks.Cubi.Sign do
   @shortdoc "Signs a cubi release archive"
   @moduledoc """
-  Adds `manifest.sig` and `signer.pem` to a release archive, in place
-  (docs/specs.md §2.11.4, `Cubi.Pki.Archive`):
+  Adds `manifest.sig`, `signer.pem` and `ca.pem`, the signer's root, to a
+  release archive, in place (docs/specs.md §2.11.4, `Cubi.Pki.Archive`). The
+  root is for nodes that pin it with `cubi.ca=` rather than carry it in their
+  image (§2.12.2); a node with its own CA ignores it.
 
       mix cubi.sign [ARCHIVE] [--signer DIR]
 
@@ -11,7 +13,7 @@ defmodule Mix.Tasks.Cubi.Sign do
     * `--signer DIR` - the PKI directory (`mix cubi.gen_ca`), default
       `CUBI_PKI_DIR`, else `~/.cubi/pki`
 
-  An archive already signed is signed again: both members are replaced. One
+  An archive already signed is signed again: all three members are replaced. One
   whose files do not match its manifest is refused, and so is a signer its own
   root does not accept: the archive is checked as a node would, signer dates
   included, before it is written.
@@ -39,9 +41,11 @@ defmodule Mix.Tasks.Cubi.Sign do
         {:error, reason} -> Mix.raise("#{archive} is not a cubi release: #{inspect(reason)}")
       end
 
+    ca = File.read!(paths.ca_cert)
+
     signed =
-      with {:ok, signed} <- Archive.sign(entries, Cubi.Pki.load_signer!(dir)),
-           {:ok, _manifest} <- Archive.verify(signed, File.read!(paths.ca_cert)) do
+      with {:ok, signed} <- Archive.sign(entries, Cubi.Pki.load_signer!(dir), ca: ca),
+           {:ok, _manifest} <- Archive.verify(signed, ca) do
         signed
       else
         {:error, reason} -> Mix.raise("cannot sign #{archive}: #{inspect(reason)}")
@@ -53,8 +57,14 @@ defmodule Mix.Tasks.Cubi.Sign do
     Mix.shell().info("""
     #{manifest["name"]} #{manifest["version"]} signed: #{Path.relative_to_cwd(archive)}
       root SHA-256: #{Cubi.Pki.ca_fingerprint(dir)}
-    Nodes accept it if their image trusts that root (/etc/cubi/ca.pem).
+    Nodes accept it if their image trusts that root (/etc/cubi/ca.pem), or if
+    their cmdline pins it: cubi.ca=sha256:#{pin(ca)}
     """)
+  end
+
+  defp pin(ca) do
+    {:ok, hex} = Cubi.Pki.cert_sha256(ca)
+    hex
   end
 
   defp archive!([path | _]) do

@@ -24,13 +24,18 @@ defmodule Cubi.E2E.Node do
   `Cubi.Provider.Qemu` instance's `ssh_port`). Waits for ssh to come
   up for at most `timeout` ms, which covers the boot. Raises
   `Cubi.E2E.Node.EvalError` if the code raises on the guest.
+
+  `key_dir:` logs in with the key there (`id_ed25519`) rather than the
+  harness's: a node provisioned for an operator lets in that operator's key
+  only (`Cubi.E2E.Key.operator/1`).
   """
-  @spec eval(GenServer.server() | :inet.port_number(), String.t(), timeout()) :: term()
-  def eval(vm, code, timeout \\ 120_000) do
+  @spec eval(GenServer.server() | :inet.port_number(), String.t(), timeout(), keyword()) ::
+          term()
+  def eval(vm, code, timeout \\ 120_000, opts \\ []) do
     port = ssh_port(vm)
     deadline = System.monotonic_time(:millisecond) + timeout
 
-    conn = connect(port, deadline)
+    conn = connect(port, deadline, Keyword.get(opts, :key_dir, Key.dir()))
 
     try do
       output = exec(conn, wrap(code), remaining(deadline))
@@ -54,7 +59,7 @@ defmodule Cubi.E2E.Node do
   def subsystem(vm, name, data, timeout \\ 120_000) do
     port = ssh_port(vm)
     deadline = System.monotonic_time(:millisecond) + timeout
-    conn = connect(port, deadline)
+    conn = connect(port, deadline, Key.dir())
 
     try do
       {:ok, channel} = :ssh_connection.session_channel(conn, remaining(deadline))
@@ -120,10 +125,10 @@ defmodule Cubi.E2E.Node do
     end
   end
 
-  defp connect(port, deadline) do
+  defp connect(port, deadline, key_dir) do
     opts = [
       user: ~c"cubi-e2e",
-      user_dir: String.to_charlist(Key.dir()),
+      user_dir: String.to_charlist(key_dir),
       auth_methods: ~c"publickey",
       silently_accept_hosts: true,
       save_accepted_host: false,
@@ -140,7 +145,7 @@ defmodule Cubi.E2E.Node do
           raise "ssh to 127.0.0.1:#{port} never came up: #{inspect(reason)}"
         else
           Process.sleep(1_000)
-          connect(port, deadline)
+          connect(port, deadline, key_dir)
         end
     end
   end

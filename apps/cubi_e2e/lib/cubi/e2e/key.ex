@@ -57,4 +57,41 @@ defmodule Cubi.E2E.Key do
       :created
     end
   end
+
+  @operators Path.expand("../../../priv/operators", __DIR__)
+
+  @doc """
+  An operator of the milestone 2 tests, `:a` or `:b` (docs/milestone2.md):
+  its own CA (`pki`, a `Cubi.Pki` directory) and ssh key (`ssh_dir` holding
+  `id_ed25519`, `ssh_pub` its public key), under `priv/operators/<name>/`.
+  Neither is the harness's, so a node set up for one lets in no one else.
+  """
+  @spec operator(:a | :b) :: %{pki: Path.t(), ssh_dir: Path.t(), ssh_pub: Path.t()}
+  def operator(name) when name in [:a, :b] do
+    dir = Path.join(@operators, Atom.to_string(name))
+    ssh = Path.join(dir, "ssh")
+    %{pki: Path.join(dir, "pki"), ssh_dir: ssh, ssh_pub: Path.join(ssh, "id_ed25519.pub")}
+  end
+
+  @doc "Creates both operators' CA and key where missing. Returns the names created."
+  @spec ensure_operators!() :: [:a | :b]
+  def ensure_operators!() do
+    for name <- [:a, :b], op = operator(name), not File.exists?(op.ssh_pub) do
+      if not File.exists?(Cubi.Pki.paths(op.pki).signer_key),
+        do: Cubi.Pki.gen_ca!(op.pki, name: "cubi e2e operator #{name}")
+
+      File.mkdir_p!(op.ssh_dir)
+      File.chmod!(op.ssh_dir, 0o700)
+
+      {_, 0} =
+        System.cmd(
+          "ssh-keygen",
+          ["-q", "-t", "ed25519", "-N", "", "-C", "cubi-e2e-operator-#{name}"] ++
+            ["-f", Path.join(op.ssh_dir, "id_ed25519")],
+          stderr_to_stdout: true
+        )
+
+      name
+    end
+  end
 end

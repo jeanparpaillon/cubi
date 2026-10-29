@@ -4,6 +4,9 @@
 # The test CA is generated locally (`mix cubi.e2e.key`), never committed.
 /priv/pki/
 
+# The milestone 2 operators' CAs and keys (`mix cubi.e2e.key`), never committed.
+/priv/operators/
+
 # ExUnit @tag :tmp_dir.
 /tmp/
 

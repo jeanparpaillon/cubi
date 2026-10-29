@@ -72,16 +72,18 @@ defmodule Cubi.E2E.Hello do
 
   @doc """
   `mix cubi.deploy` of `archive` to the VM's forwarded ssh port (or that port
-  itself, for a `Cubi.Provider.Qemu` instance), with the harness key. Returns `{output, exit_status}`.
+  itself, for a `Cubi.Provider.Qemu` instance), with the harness key, or the
+  one in `key_dir:`. Returns `{output, exit_status}`.
   """
-  @spec deploy(GenServer.server() | :inet.port_number(), Path.t()) ::
+  @spec deploy(GenServer.server() | :inet.port_number(), Path.t(), keyword()) ::
           {String.t(), non_neg_integer()}
-  def deploy(vm, archive) do
+  def deploy(vm, archive, opts \\ []) do
     port = if is_integer(vm), do: vm, else: VM.info(vm).paths.ssh_port
+    identity = Path.join(Keyword.get(opts, :key_dir, Key.dir()), "id_ed25519")
 
     args =
       ["cubi.deploy", "127.0.0.1", archive, "--port", Integer.to_string(port)] ++
-        ["--user", "cubi-e2e", "--identity", Path.join(Key.dir(), "id_ed25519")] ++
+        ["--user", "cubi-e2e", "--identity", identity] ++
         Enum.flat_map(
           ~w(StrictHostKeyChecking=no UserKnownHostsFile=/dev/null LogLevel=ERROR),
           &["--ssh-option", &1]

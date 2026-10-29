@@ -57,6 +57,13 @@ The tests boot the same image as production, with exactly three differences:
   (`TRUST=` + `imgverify`, [specs §2.7](specs.md)) refuses an e2e image, so a
   test build can never be booted by mistake on a real boot server.
 
+Milestone 2 boots the **public image** too (`MIX_ENV=public mix firmware.ipxe
+--public`, [specs §2.12.1](specs.md)), which has no key and no CA at all: the
+tests configure it through the boot script's cmdline, as an operator would,
+with the harness's test CA and key, or with those of two operators, A and B,
+that `mix cubi.e2e.key` creates in `priv/operators/`. The tests build that
+directory when it is missing (`Cubi.E2E.Public`), unsigned.
+
 There are no test-only code paths in cubi itself: no `cubi.test=1` flag, and
 no backdoor in `cluster_boot`. What the tests check is what ships.
 
@@ -210,6 +217,8 @@ qemu-system-x86_64 -machine q35,accel=kvm -cpu host -m 1024 -nographic \
 | [4](phase4.md) | `phase4_netboot_test.exs` | 1 | TFTP and HTTP × BIOS and UEFI, no disk |
 | [5](phase5.md) | `phase5_boot_chain_test.exs` | 2 | tampered squashfs refused; script per UUID; proxy-DHCP next to plain DHCP |
 | [6](phase6.md) | `phase6_storage_test.exs` | 1 | blank mirror created; reboot keeps Khepri data; dirty disk and missing `cubi.zfs.create=1` refused |
+| [M1](milestone1.md) | `milestone1_imgverify_test.exs`, `milestone1_deploy_node_test.exs`, `milestone1_acceptance_test.exs` | 1 | trusted iPXE; `hello` v1–v4 built, signed and deployed with the real tasks |
+| [M2](milestone2.md) | `milestone2_*_test.exs` | 1 | the public directory; `Cubi.Provider.Qemu` instances booted from rendered scripts; operators A and B; the provider tasks run from the `hello` fixture; the GitHub release with `--include network` |
 | [7](phase7.md) | `phase7_cluster_test.exs` | 2 | bootstrap through the web page; 3 storage + 1 diskless; each refusal case; A's token presented as B; `/zfs-key` refusals; `Cubi.E2E.Leak` over everything; first node restarted alone; whole-cluster restart through the unlock page; exported key opens a disk image outside cubi |
 
 A failing acceptance bullet names its test, and the test names the bullet in

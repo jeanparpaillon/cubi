@@ -3,7 +3,7 @@
 Runs BEAM releases on a cluster without Kubernetes: nodes network-boot into BEAM,
 join with a token, and keep membership in Khepri on ZFS.
 
-**Status: phases 0–4 done; phase 6 steps 1–3 done (phase 5 not started); [milestone 1](docs/milestone1.md) done: signed images, and signed releases deployed onto running nodes.** Code so far: the test harness, the firmware app, the forked Nerves system, the PKI and the operator's tasks.
+**Status: phases 0–4 done; phase 6 steps 1–3 done (phase 5 not started); [milestone 1](docs/milestone1.md) done: signed images, and signed releases deployed onto running nodes; [milestone 2](docs/milestone2.md) done: public images published as GitHub releases (v0.1.0), private boot scripts, and `Cubi.Provider` with QEMU (cloud providers are [milestone 4](docs/milestone4.md)).** Code so far: the test harness, the firmware app, the forked Nerves system, the PKI and the operator's tasks.
 
 An umbrella project: `config/`, `deps/`, `_build/` and `mix.lock` are shared at
 the root, and the apps live in `apps/`.
@@ -22,7 +22,7 @@ umbrella), meant as releases to deploy onto a node ([docs/specs.md](docs/specs.m
 §2.11): `examples/cubi_hello` is a one-page Bandit app that prints its version.
 
 Run `mix cubi.e2e.key` in `apps/cubi_e2e` before building e2e firmware (it
-creates the harness ssh key and the test CA that signs e2e images), and
+creates the harness ssh key and the test CA that signs e2e images, and the two operators of the milestone 2 tests), and
 `mix cubi.e2e.ipxe` once before the network-boot tests (it fetches
 Ubuntu's `ipxe.efi`, `CUBI_E2E_IPXE_EFI` overrides; and builds cubi's own
 iPXE trusting the test CA into `priv/ipxe/trusted/`, with `mix cubi.ipxe`,

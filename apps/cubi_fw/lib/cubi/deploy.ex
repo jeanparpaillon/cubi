@@ -6,8 +6,10 @@ defmodule Cubi.Deploy do
   `install/2` takes an archive, as `mix cubi.deploy` sends it through the
   `cubi_deploy` ssh subsystem (`Cubi.Deploy.Subsystem`):
 
-    1. read it and verify it against the image's root, `/etc/cubi/ca.pem`,
-       signer dates included (`Cubi.Pki.Archive.verify/3`);
+    1. read it and verify it, signer dates included
+       (`Cubi.Pki.Archive.verify/3`), against the trusted root: the image's
+       `/etc/cubi/ca.pem`, or the archive's own `ca.pem` when the cmdline's
+       `cubi.ca=` pins it (`Cubi.Deploy.Trust`);
     2. check it against this node (`Cubi.Deploy.Check`);
     3. unpack it to `/cubi/releases/<version>/` (`Cubi.Deploy.Store`);
     4. stop the current release, load and start the new one
@@ -38,12 +40,13 @@ defmodule Cubi.Deploy do
 
   require Logger
 
-  alias Cubi.Deploy.{Check, Loader, Store}
+  alias Cubi.Deploy.{Check, Loader, Store, Trust}
   alias Cubi.Pki.Archive
 
   @defaults [
     root: "/cubi/releases",
     ca_cert: "/etc/cubi/ca.pem",
+    cmdline: "/proc/cmdline",
     settle: 10_000,
     # Options for the target only: wait for Cubi.Storage, and mount a tmpfs
     # here if nothing is mounted on it.
@@ -85,6 +88,7 @@ defmodule Cubi.Deploy do
 
   @impl GenServer
   def handle_continue(:prepare, state) do
+    log_trust(state.opts)
     if state.opts[:wait_storage], do: Cubi.Storage.status()
     if state.opts[:tmpfs], do: ensure_tmpfs(state.opts[:tmpfs], state.opts[:mounts])
     File.mkdir_p!(Store.incoming_dir(state.root))
@@ -131,7 +135,7 @@ defmodule Cubi.Deploy do
     progress.("verifying")
 
     with {:ok, entries} <- Archive.read(archive),
-         {:ok, ca} <- read_ca(state.opts[:ca_cert]),
+         {:ok, ca} <- trusted_root(state.opts, entries),
          {:ok, manifest} <- Archive.verify(entries, ca),
          :ok <- Check.run(manifest, node, stored, current_name(state)) do
       version = manifest["version"]
@@ -207,7 +211,7 @@ defmodule Cubi.Deploy do
   # excepted (§2.11.4). Leaves nothing loaded if it fails.
   defp start_from_disk(state, version, node) do
     with {:ok, entries} <- Store.entries(state.root, version),
-         {:ok, ca} <- read_ca(state.opts[:ca_cert]),
+         {:ok, ca} <- trusted_root(state.opts, entries),
          {:ok, manifest} <- Archive.verify(entries, ca, check_dates: false),
          :ok <- Loader.load(Store.version_dir(state.root, version), manifest, node.lib) do
       case Loader.start(manifest) do
@@ -282,10 +286,43 @@ defmodule Cubi.Deploy do
 
   defp node_info(opts), do: if(opts[:node], do: opts[:node], else: Check.node())
 
-  defp read_ca(path) do
-    case File.read(path) do
-      {:ok, pem} -> {:ok, pem}
-      {:error, _} -> {:error, {:no_trusted_ca, path}}
+  # Read again for every verification: neither changes while the node runs,
+  # and both are small.
+  defp trusted_root(opts, entries), do: Trust.root(image_ca(opts), pin(opts), entries)
+
+  defp image_ca(opts) do
+    case File.read(opts[:ca_cert]) do
+      {:ok, pem} -> pem
+      {:error, _} -> nil
+    end
+  end
+
+  defp pin(opts) do
+    case File.read(opts[:cmdline]) do
+      {:ok, text} -> text |> Cubi.Cmdline.parse() |> Trust.pin()
+      {:error, _} -> nil
+    end
+  end
+
+  # Which root releases will be checked against, said once at boot, and
+  # loudly when nothing can be deployed (§2.11.4 step 1).
+  defp log_trust(opts) do
+    {image_ca, pin} = {image_ca(opts), pin(opts)}
+
+    case {Trust.conflict(image_ca, pin), image_ca, pin} do
+      {{:error, reason}, _, _} ->
+        Logger.error("deploy: every release will be refused: #{inspect(reason)}")
+
+      {:ok, nil, nil} ->
+        Logger.error(
+          "deploy: no #{opts[:ca_cert]} and no cubi.ca= pin, every release will be refused"
+        )
+
+      {:ok, nil, {:ok, hex}} ->
+        Logger.info("deploy: releases trusted from their own ca.pem, pinned to sha256:#{hex}")
+
+      {:ok, _ca, _pin} ->
+        Logger.info("deploy: releases trusted from #{opts[:ca_cert]}")
     end
   end
 

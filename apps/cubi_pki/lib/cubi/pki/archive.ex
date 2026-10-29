@@ -1,8 +1,9 @@
 defmodule Cubi.Pki.Archive do
   @moduledoc """
   A cubi release archive (docs/specs.md §2.11.3, §2.11.4): a gzipped tar of
-  `manifest.json`, the files it hashes and, once signed, `manifest.sig` and
-  `signer.pem`.
+  `manifest.json`, the files it hashes and, once signed, `manifest.sig`,
+  `signer.pem` and optionally `ca.pem`, the signer's root, for nodes that pin
+  it on their cmdline rather than carry it (§2.12.2).
 
   Reading, writing and checking it live here, next to `Cubi.Pki`, because both
   sides need them: `mix cubi.release` and `mix cubi.sign` on the host, the
@@ -13,12 +14,20 @@ defmodule Cubi.Pki.Archive do
   @manifest "manifest.json"
   @signature "manifest.sig"
   @signer "signer.pem"
+  @ca "ca.pem"
 
   @type entries :: %{String.t() => binary()}
 
   @doc "The members that are not files of the release."
   @spec meta_members() :: [String.t()]
-  def meta_members(), do: [@manifest, @signature, @signer]
+  def meta_members(), do: [@manifest, @signature, @signer, @ca]
+
+  @doc """
+  The root certificate the archive carries, if any. Never trusted as such:
+  only a node's `cubi.ca=` pin can make it the root (`Cubi.Deploy.Trust`).
+  """
+  @spec ca(entries()) :: String.t() | nil
+  def ca(entries), do: Map.get(entries, @ca)
 
   @doc """
   Reads an archive into `%{path => content}`. Refuses anything but regular
@@ -46,7 +55,7 @@ defmodule Cubi.Pki.Archive do
 
   @doc """
   Writes `entries` as an archive at `path`: `manifest.json` first, then the
-  signature and the signer if present, then the files in path order.
+  signature, the signer and the root if present, then the files in path order.
   """
   @spec write!(Path.t(), entries()) :: :ok
   def write!(path, entries) do

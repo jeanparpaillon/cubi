@@ -103,6 +103,21 @@ defmodule Cubi.Pki.ArchiveTest do
                {:error, :bad_signature}
     end
 
+    test "a ca.pem member is known: not an unlisted file, round-tripped, never trusted by itself",
+         %{pki: pki, other: other, tmp_dir: tmp} do
+      {:ok, signed} = Archive.sign(entries(), Pki.load_signer!(pki))
+      with_ca = Map.put(signed, "ca.pem", ca(other))
+
+      assert Archive.ca(with_ca) == ca(other)
+      assert Archive.ca(signed) == nil
+      assert {:ok, _} = Archive.verify(with_ca, ca(pki))
+      assert {:error, {:bad_signer_chain, _}} = Archive.verify(with_ca, ca(other))
+
+      path = Path.join(tmp, "a.tar.gz")
+      Archive.write!(path, with_ca)
+      assert Archive.read!(path) == with_ca
+    end
+
     test "sign/2 refuses files that do not match the manifest", %{pki: pki} do
       assert {:error, {:hash_mismatch, _}} =
                Archive.sign(Map.put(entries(), "lib/a-1/priv/x", "y"), Pki.load_signer!(pki))

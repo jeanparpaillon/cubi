@@ -16,7 +16,8 @@ defmodule Cubi.DeployFixtures do
   @doc """
   An archive for release `name` (and application `app`), version `vsn`,
   signed by the signer in `pki`. Options: `:otp_release`, `:requires`,
-  `:sign` (default `true`).
+  `:sign` (default `true`), `:ca` (a PKI directory whose root is added as the
+  archive's `ca.pem`).
   """
   @spec archive(String.t(), String.t(), String.t(), atom(), Path.t(), keyword()) :: binary()
   def archive(name, app, vsn, behaviour, pki, opts \\ []) do
@@ -46,6 +47,12 @@ defmodule Cubi.DeployFixtures do
         signed
       else
         entries
+      end
+
+    entries =
+      case Keyword.get(opts, :ca) do
+        nil -> entries
+        dir -> Map.put(entries, "ca.pem", File.read!(Cubi.Pki.paths(dir).ca_cert))
       end
 
     path =

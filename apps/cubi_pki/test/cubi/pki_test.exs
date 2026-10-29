@@ -146,6 +146,19 @@ defmodule Cubi.PkiTest do
 
   # A leaf issued by the root in `dir`, like the signer but with `extensions`
   # merged in. A small EC key: only the chain and the usage matter here.
+  describe "cert_sha256/1" do
+    test "the root's fingerprint, lowercase and without colons", %{pki: dir, other: other} do
+      {:ok, hex} = Pki.cert_sha256(ca_pem(dir))
+      assert hex =~ ~r/\A[0-9a-f]{64}\z/
+      assert hex == Pki.ca_fingerprint(dir) |> String.replace(":", "") |> String.downcase()
+      assert Pki.cert_sha256(ca_pem(other)) != {:ok, hex}
+    end
+
+    test "garbage is not a certificate" do
+      assert Pki.cert_sha256("nope") == {:error, :bad_certificate}
+    end
+  end
+
   defp issue(dir, extensions, validity \\ 365) do
     paths = Pki.paths(dir)
     ca = paths.ca_cert |> File.read!() |> X509.Certificate.from_pem!()

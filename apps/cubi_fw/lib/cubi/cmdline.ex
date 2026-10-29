@@ -31,6 +31,21 @@ defmodule Cubi.Cmdline do
     end)
   end
 
+  @doc """
+  The ssh authorized keys named by `cubi.ssh=<type>:<base64>` (docs/specs.md
+  §2.12.2), as `authorized_keys` lines, in cmdline order. The `:` stands for
+  the line's space; there is no comment. Malformed values are left out.
+
+      iex> Cubi.Cmdline.ssh_keys([{"cubi.ssh", "ssh-ed25519:AAAAC3Nz"}, {"cubi.ssh", "junk"}])
+      ["ssh-ed25519 AAAAC3Nz"]
+  """
+  @spec ssh_keys([arg()]) :: [String.t()]
+  def ssh_keys(args) do
+    for {"cubi.ssh", value} <- args,
+        [_, type, key] <- [Regex.run(~r/\A([a-z0-9@.-]+):([A-Za-z0-9+\/]+={0,2})\z/, value || "")],
+        do: type <> " " <> key
+  end
+
   defp split(<<>>, acc, "", _quoted), do: Enum.reverse(acc)
   defp split(<<>>, acc, cur, _quoted), do: Enum.reverse([cur | acc])
   defp split(<<?", rest::binary>>, acc, cur, quoted), do: split(rest, acc, cur, not quoted)

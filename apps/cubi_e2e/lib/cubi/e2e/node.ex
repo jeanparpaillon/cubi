@@ -97,6 +97,29 @@ defmodule Cubi.E2E.Node do
     """
   end
 
+  @doc """
+  One ssh login attempt with the key in `key_dir` (`id_ed25519`, as `:ssh`'s
+  `user_dir`), closed at once. For checking which keys a guest accepts; use
+  `eval/3` to wait for a guest to come up.
+  """
+  @spec login(GenServer.server() | :inet.port_number(), Path.t()) :: :ok | {:error, term()}
+  def login(vm, key_dir) do
+    opts = [
+      user: ~c"cubi-e2e",
+      user_dir: String.to_charlist(key_dir),
+      auth_methods: ~c"publickey",
+      silently_accept_hosts: true,
+      save_accepted_host: false,
+      user_interaction: false,
+      connect_timeout: 5_000
+    ]
+
+    case :ssh.connect(~c"127.0.0.1", ssh_port(vm), opts, 10_000) do
+      {:ok, conn} -> :ssh.close(conn)
+      {:error, _} = error -> error
+    end
+  end
+
   defp connect(port, deadline) do
     opts = [
       user: ~c"cubi-e2e",

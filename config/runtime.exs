@@ -24,4 +24,19 @@ if config_target() != :host do
     {:error, _} ->
       :ok
   end
+
+  # cubi.ssh=<type>:<base64> on the cmdline adds authorized keys to those
+  # compiled into the image (docs/specs.md §2.12.2): a public image has none,
+  # so they are its only way in. Release boot has loaded the applications by
+  # now, so the compiled-in keys are in the application environment.
+  if Code.ensure_loaded?(Cubi.Cmdline) and File.exists?("/proc/cmdline") do
+    case Cubi.Cmdline.ssh_keys(Cubi.Cmdline.read()) do
+      [] ->
+        :ok
+
+      keys ->
+        compiled = Application.get_env(:nerves_ssh, :authorized_keys, [])
+        config :nerves_ssh, authorized_keys: Enum.uniq(compiled ++ keys)
+    end
+  end
 end

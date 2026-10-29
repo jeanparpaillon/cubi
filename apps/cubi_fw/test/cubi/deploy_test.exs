@@ -26,6 +26,7 @@ defmodule Cubi.DeployTest do
          name: nil,
          root: root,
          ca_cert: Cubi.Pki.paths(pki).ca_cert,
+         cmdline: "/nonexistent/cmdline",
          settle: 600,
          node: %{otp_release: to_string(:erlang.system_info(:otp_release)), lib: %{}}}
       )
@@ -126,6 +127,7 @@ defmodule Cubi.DeployTest do
            name: nil,
            root: ctx.root,
            ca_cert: Cubi.Pki.paths(ctx.pki).ca_cert,
+           cmdline: "/nonexistent/cmdline",
            settle: 600,
            node: %{otp_release: to_string(:erlang.system_info(:otp_release)), lib: %{}}}
         )
@@ -159,6 +161,105 @@ defmodule Cubi.DeployTest do
     test "nothing recorded, nothing started", ctx do
       deploy = restart(ctx)
       assert Cubi.Deploy.state(deploy) == %{current: nil, previous: nil, bad: []}
+    end
+  end
+
+  describe "trusted root (docs/specs.md §2.11.4 step 1)" do
+    import ExUnit.CaptureLog
+
+    # A node whose image has no CA (`/etc/cubi/ca.pem` absent) unless
+    # `image_ca` names one, booted with `cmdline`.
+    defp pinned_deploy(ctx, cmdline, image_ca \\ nil) do
+      path = Path.join(ctx.tmp_dir, "cmdline")
+      File.write!(path, cmdline <> "\n")
+      ca_cert = if image_ca, do: Cubi.Pki.paths(image_ca).ca_cert, else: "/nonexistent/ca.pem"
+
+      start_supervised!(
+        {Cubi.Deploy,
+         name: nil,
+         root: Path.join(ctx.tmp_dir, "pinned"),
+         ca_cert: ca_cert,
+         cmdline: path,
+         settle: 600,
+         node: %{otp_release: to_string(:erlang.system_info(:otp_release)), lib: %{}}},
+        id: :pinned
+      )
+    end
+
+    defp pin(dir) do
+      {:ok, hex} =
+        dir |> Cubi.Pki.paths() |> Map.fetch!(:ca_cert) |> File.read!() |> Cubi.Pki.cert_sha256()
+
+      "cubi.ca=sha256:" <> hex
+    end
+
+    defp install_on(deploy, ctx, vsn, opts) do
+      data = archive("hello", ctx.app, vsn, :ok, Keyword.get(opts, :pki, ctx.pki), opts)
+      Cubi.Deploy.install(deploy, data)
+    end
+
+    test "no image CA: the archive's own ca.pem, pinned by cubi.ca=, at deploy and at boot",
+         ctx do
+      deploy = pinned_deploy(ctx, "console=ttyS0 " <> pin(ctx.pki))
+
+      assert install_on(deploy, ctx, "0.1.0", ca: ctx.pki) ==
+               {:ok, %{name: "hello", version: "0.1.0"}}
+
+      assert running_vsn(ctx.app) == "0.1.0"
+
+      # A storage node at its next boot: verified again from disk, ca.pem kept.
+      :ok = stop_supervised(:pinned)
+      cleanup(ctx.app)
+      deploy = pinned_deploy(ctx, pin(ctx.pki))
+      assert Cubi.Deploy.state(deploy).current == "0.1.0"
+      assert running_vsn(ctx.app) == "0.1.0"
+    end
+
+    test "no image CA: archives without the pinned root are refused", ctx do
+      deploy = pinned_deploy(ctx, pin(ctx.pki))
+
+      assert install_on(deploy, ctx, "0.1.0", []) == {:error, :no_archive_ca}
+
+      # Correctly signed under its own ca.pem, which is not the pinned one.
+      assert {:error, {:archive_ca_not_pinned, _}} =
+               install_on(deploy, ctx, "0.1.0", pki: ctx.other, ca: ctx.other)
+
+      # The pinned root, but a signer from another one.
+      assert {:error, {:bad_signer_chain, _}} =
+               install_on(deploy, ctx, "0.1.0", pki: ctx.other, ca: ctx.pki)
+
+      refute running_vsn(ctx.app)
+      assert Cubi.Deploy.state(deploy) == %{current: nil, previous: nil, bad: []}
+    end
+
+    test "an image CA pinned to another root refuses every release, and says so at boot",
+         ctx do
+      {deploy, log} =
+        with_log(fn ->
+          deploy = pinned_deploy(ctx, pin(ctx.other), ctx.pki)
+          _ = Cubi.Deploy.state(deploy)
+          deploy
+        end)
+
+      assert log =~ "every release will be refused"
+      assert log =~ "ca_pin_mismatch"
+
+      assert {:error, {:ca_pin_mismatch, _}} = install_on(deploy, ctx, "0.1.0", ca: ctx.pki)
+
+      assert {:error, {:ca_pin_mismatch, _}} =
+               install_on(deploy, ctx, "0.1.0", pki: ctx.other, ca: ctx.other)
+    end
+
+    test "neither an image CA nor a pin: every release is refused", ctx do
+      {deploy, log} =
+        with_log(fn ->
+          deploy = pinned_deploy(ctx, "console=ttyS0")
+          _ = Cubi.Deploy.state(deploy)
+          deploy
+        end)
+
+      assert log =~ "no cubi.ca= pin, every release will be refused"
+      assert install_on(deploy, ctx, "0.1.0", ca: ctx.pki) == {:error, :no_trusted_ca}
     end
   end
 

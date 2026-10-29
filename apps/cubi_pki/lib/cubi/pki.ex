@@ -69,6 +69,23 @@ defmodule Cubi.Pki do
     |> Enum.map_join(":", &Enum.join/1)
   end
 
+  @doc """
+  The SHA-256 of a PEM certificate's DER, as lowercase hex: the form a
+  `cubi.ca=sha256:<hex>` pin takes (docs/specs.md §2.12.2). Only the first
+  certificate of the PEM counts.
+  """
+  @spec cert_sha256(String.t()) :: {:ok, String.t()} | {:error, :bad_certificate}
+  def cert_sha256(pem) do
+    case X509.Certificate.from_pem(pem) do
+      {:ok, cert} ->
+        der = X509.Certificate.to_der(cert)
+        {:ok, :crypto.hash(:sha256, der) |> Base.encode16(case: :lower)}
+
+      {:error, _} ->
+        {:error, :bad_certificate}
+    end
+  end
+
   @doc "The paths of the four files in a PKI directory."
   @spec paths(Path.t()) :: %{atom() => Path.t()}
   def paths(dir) do

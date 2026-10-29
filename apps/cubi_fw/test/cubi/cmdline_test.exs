@@ -17,6 +17,21 @@ defmodule Cubi.CmdlineTest do
     assert Cmdline.parse("a=1 a=2") == [{"a", "1"}, {"a", "2"}]
   end
 
+  test "ssh_keys/1: cubi.ssh= values as authorized_keys lines, in order, malformed ones left out" do
+    args =
+      Cmdline.parse(
+        "cubi.ssh=ssh-ed25519:AAAAC3NzaC1lZDI1NTE5AAAAIA cubi.ssh=ssh-rsa:AAAAB3Nza== " <>
+          "cubi.ssh=ecdsa-sha2-nistp256:AAAAE2Vj cubi.ssh cubi.ssh= cubi.ssh=ssh-ed25519 " <>
+          "cubi.ssh=ssh-ed25519:AA:BB other=ssh-rsa:AAAA"
+      )
+
+    assert Cmdline.ssh_keys(args) == [
+             "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIA",
+             "ssh-rsa AAAAB3Nza==",
+             "ecdsa-sha2-nistp256 AAAAE2Vj"
+           ]
+  end
+
   @tag :tmp_dir
   test "read/1", %{tmp_dir: dir} do
     path = Path.join(dir, "cmdline")

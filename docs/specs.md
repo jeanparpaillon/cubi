@@ -1012,7 +1012,10 @@ The node verifies with `:public_key` only, no OpenSSL, in this order:
    else the archive's `ca.pem` if its SHA-256 (over the DER) equals the
    cmdline's `cubi.ca=sha256:<hex>` (§2.12.2). If the image has a CA *and* the
    cmdline pins one, they must be the same certificate, or every release is
-   refused, which is logged at boot. With neither, every release is refused.
+   refused, which is logged at boot. So is a malformed pin (anything but
+   `sha256:` and 64 lowercase hex digits; the last `cubi.ca=` counts): it was
+   meant to restrict trust, and is never ignored. With neither a CA nor a pin,
+   every release is refused. `Cubi.Deploy.Trust` makes the choice.
    `Cubi.Pki.Archive.verify` takes the trusted root as an argument; choosing
    it is `Cubi.Deploy`'s job.
 2. `manifest.sig` verifies over `manifest.json` with the signer's key.
@@ -1208,7 +1211,7 @@ The operator's configuration moves from the image to the cmdline, read with
 | --- | --- | --- |
 | `cubi.rootfs=sha256:<hex>` | the SHA-256 of `rootfs.squashfs` | stage-1, before `losetup` (§2.4): a mismatch prints `cubi stage-1: rootfs hash mismatch` and reboots, like any stage-1 failure. Absent, there is no check and the console says so |
 | `cubi.ca=sha256:<hex>` | the SHA-256 of the operator's root certificate (DER) | `Cubi.Deploy`, when verifying a release (§2.11.4 step 1) |
-| `cubi.ssh=<type>:<base64>` | one ssh authorized key, repeatable. The space of the `authorized_keys` line becomes `:`, and the comment is dropped | `config/runtime.exs`, into `nerves_ssh`'s `authorized_keys` |
+| `cubi.ssh=<type>:<base64>` | one ssh authorized key, repeatable. The space of the `authorized_keys` line becomes `:`, and the comment is dropped | `config/runtime.exs`, added to the keys compiled into the image, if any, in `nerves_ssh`'s `authorized_keys`. Malformed values are ignored |
 
 - **A pin, not the certificate.** An RSA-3072 root is ~0.9 KB of DER, ~1.2 KB
   in base64, out of x86's 2048-byte `COMMAND_LINE_SIZE`, which phase 7's

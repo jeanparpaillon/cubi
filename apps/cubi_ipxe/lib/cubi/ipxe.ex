@@ -177,6 +177,24 @@ defmodule Cubi.Ipxe do
     :ok
   end
 
+  @doc """
+  `check_public!/1` on a built `rootfs.squashfs`: unpacked into `work`, then
+  removed.
+  """
+  @spec check_public_rootfs!(Path.t(), Path.t()) :: :ok
+  def check_public_rootfs!(squashfs, work) do
+    root = Path.join(work, "root")
+    File.rm_rf!(root)
+    File.mkdir_p!(work)
+    {_, 0} = cmd!("unsquashfs", ["-n", "-d", root, squashfs])
+
+    try do
+      check_public!(root)
+    after
+      File.rm_rf!(root)
+    end
+  end
+
   defp sys_config!(root) do
     erlang = Path.join(root, "srv/erlang")
 

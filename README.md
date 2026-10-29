@@ -62,12 +62,13 @@ The script pins the rootfs by its hash and your CA by its fingerprint, and
 names the ssh keys allowed to log in. None of that is secret, but whoever
 writes the script decides what the node runs, so it never sits at a public URL.
 
-`mix cubi.provision <name> --provider vultr` renders the script, creates the
-instance and waits for ssh; `mix cubi.deploy <name> --provider vultr` then
+`mix cubi.provision <name> --provider <p>` renders the script, creates the
+instance and waits for ssh; `mix cubi.deploy <name> --provider <p>` then
 deploys your signed release as above. `mix cubi.instances`, `mix cubi.upgrade`
 (a reboot onto another version) and `mix cubi.destroy` do the rest. Providers
-sit behind a `Cubi.Provider` behaviour: QEMU locally, and Vultr first among
-the clouds ([docs/specs.md](docs/specs.md) §2.12).
+sit behind a `Cubi.Provider` behaviour: QEMU locally for now; Vultr, EC2 and
+OVHcloud come with [milestone 4](docs/milestone4.md)
+([docs/specs.md](docs/specs.md) §2.12).
 
 ## Is it for you?
 
@@ -212,7 +213,7 @@ Each phase ends with an acceptance test, automated as described in
 | [M1](docs/milestone1.md) | Signed releases deployed to standalone nodes, no distribution |
 | [M2](docs/milestone2.md) | Cloud instances from public images, a private iPXE script and `Cubi.Provider` |
 | [M3](docs/milestone3.md) | Dress it for release: format, credo, dialyzer, docs |
-| [M4](docs/milestone4.md) | More providers: EC2, OVHcloud Public Cloud and bare metal |
+| [M4](docs/milestone4.md) | Cloud providers: Vultr, EC2, OVHcloud Public Cloud and bare metal |
 | [7](docs/phase7.md) | Plug into cubi: join, leave, membership |
 | [8](docs/phase8.md) | Real hardware |
 

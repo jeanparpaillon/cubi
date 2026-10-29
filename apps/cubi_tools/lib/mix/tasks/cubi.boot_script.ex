@@ -7,9 +7,11 @@ defmodule Mix.Tasks.Cubi.BootScript do
       mix cubi.boot_script [--image VERSION|URL] [--local DIR] [--ca DIR]
                            [--ssh FILE]… [--no-ssh] [--cmdline ARGS] [--output FILE]
 
-    * `--image` - a published image: its URL, or a version found under
-      `config :cubi_tools, :image_base`. Default: the version of
-      `cubi_tools` itself
+    * `--image` - a published image: its URL, or a version. A version is
+      looked up through `config :cubi_tools, :image_base`, a URL template
+      with `{version}` in it, by default the cubi project's GitHub releases
+      (`https://github.com/jeanparpaillon/cubi/releases/download/v{version}`).
+      Default: the version of `cubi_tools` itself
     * `--local DIR` - the same image in a local directory (`mix
       firmware.ipxe --public`): the pins are read from it, and `--image` may
       then name a local server, such as `http://10.0.2.2:<port>` for a QEMU
@@ -80,23 +82,26 @@ defmodule Mix.Tasks.Cubi.BootScript do
     end
   end
 
+  # The cubi project's releases on GitHub: one release per image version,
+  # tagged v<version>, its files as assets (docs/specs.md §2.12.1).
+  @image_base "https://github.com/jeanparpaillon/cubi/releases/download/v{version}"
+
   @doc false
-  # A URL as is; a version under config :cubi_tools, :image_base.
+  # A URL as is; a version through config :cubi_tools, :image_base, a URL
+  # with `{version}` in it (else `/<version>` is appended), by default the
+  # project's GitHub releases.
   def image!(nil), do: image!(Application.spec(:cubi_tools, :vsn) |> to_string())
 
   def image!(image) do
-    cond do
-      String.contains?(image, "://") ->
-        image
+    if String.contains?(image, "://") do
+      image
+    else
+      version = String.trim_leading(image, "v")
+      base = Application.get_env(:cubi_tools, :image_base, @image_base)
 
-      base = Application.get_env(:cubi_tools, :image_base) ->
-        String.trim_trailing(base, "/") <> "/" <> image
-
-      true ->
-        Mix.raise(
-          "--image #{image} is a version, and config :cubi_tools, :image_base is not set: " <>
-            "give the image's URL"
-        )
+      if String.contains?(base, "{version}"),
+        do: String.replace(base, "{version}", version),
+        else: String.trim_trailing(base, "/") <> "/" <> version
     end
   end
 

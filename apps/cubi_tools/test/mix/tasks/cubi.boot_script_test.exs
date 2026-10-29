@@ -83,13 +83,19 @@ defmodule Mix.Tasks.Cubi.BootScriptTest do
     refute out =~ "cubi.ssh="
   end
 
-  test "a version is looked up under :image_base" do
-    Application.put_env(:cubi_tools, :image_base, "https://images.example/cubi/")
+  test "a version is looked up through :image_base, by default the project's GitHub releases" do
     on_exit(fn -> Application.delete_env(:cubi_tools, :image_base) end)
-    assert BootScript.image!("0.2.0") == "https://images.example/cubi/0.2.0"
+
+    assert BootScript.image!("0.2.0") ==
+             "https://github.com/jeanparpaillon/cubi/releases/download/v0.2.0"
+
+    assert BootScript.image!("v0.2.0") == BootScript.image!("0.2.0")
     assert BootScript.image!("https://other/x") == "https://other/x"
 
-    Application.delete_env(:cubi_tools, :image_base)
-    assert_raise Mix.Error, ~r/image_base/, fn -> BootScript.image!("0.2.0") end
+    Application.put_env(:cubi_tools, :image_base, "https://images.example/cubi/")
+    assert BootScript.image!("0.2.0") == "https://images.example/cubi/0.2.0"
+
+    Application.put_env(:cubi_tools, :image_base, "https://cdn.example/cubi-{version}/img")
+    assert BootScript.image!("0.2.0") == "https://cdn.example/cubi-0.2.0/img"
   end
 end

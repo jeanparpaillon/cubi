@@ -65,9 +65,6 @@ Decisions not yet taken. Section numbers refer to [specs.md](specs.md).
   ([milestone 2](milestone2.md)); the rootfs and releases are pinned by the
   private script. A cubi-built iPXE per provider image (an AMI, an uploaded
   ISO), trusting the cubi project's CA, would `imgverify` them too.
-- **Where the public images live.** GitHub release assets, a bucket behind a
-  CDN, or both. Decides the redirect behaviour iPXE must follow
-  ([phase 0](phase0.md)), and who can replace a published file.
 - **Storage nodes in the cloud.** Milestone 2 instances are diskless. Block
   volumes named by `cubi.vdevs=` ([§2.10.3](specs.md)) need stable device
   names per provider, and a `Cubi.Provider` callback to attach them.

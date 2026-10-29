@@ -769,10 +769,25 @@ local tests only.
 
 The project publishes one directory per version: `vmlinuz`,
 `stage1.cpio.zst`, `rootfs.squashfs`, `base.json`, `SHA256SUMS`, and the
-`.sig` files, signed by the **cubi project's** CA for operators who run a
-custom iPXE that trusts it (§2.11.2). That CA is created with
-`mix cubi.gen_ca` and kept offline, like any operator's (§2.11.1). Where the
-directories are hosted is open ([questions.md](questions.md)).
+`.sig` files, staged by `mix firmware.publish` (`Cubi.Ipxe.Publish`), which
+refuses an unsigned image, a `.sig` the project's root does not verify, a file
+off its `SHA256SUMS`, a rootfs with a CA or an ssh login, and a version
+already staged: a published file is never replaced, since operators' scripts
+pin the rootfs. `boot.ipxe` is not published, a script without pins being no
+use to anyone. The `.sig` files are signed by the **cubi project's** CA, for
+operators who run a custom iPXE that trusts it (§2.11.2). That CA is created with
+`mix cubi.gen_ca` and kept offline, like any operator's (§2.11.1), in
+`~/.cubi/project-pki` on the maintainer's machine. Signing needs it, so
+publishing is a manual step, never CI's.
+
+**The images are GitHub release assets** of `jeanparpaillon/cubi`: one release
+per version, tagged `v<version>` on the commit it was built from, created by
+`mix firmware.publish --release`. A version's directory is therefore
+`https://github.com/jeanparpaillon/cubi/releases/download/v<version>/`,
+`config :cubi_tools, :image_base`'s default (a URL template with
+`{version}`, which an operator may point at a mirror). GitHub answers that
+URL with a redirect to its asset host, which iPXE and `Cubi.Tools.Image` must
+follow **(verify)**. Only the repository's maintainers can replace an asset.
 
 `mix cubi.release --base` accepts the published directory's URL (§2.11.3), so
 an operator builds releases against a public image without downloading it.
@@ -877,8 +892,8 @@ Providers:
 | Module | What |
 | --- | --- |
 | `Cubi.Provider.Qemu` | local, for development and for the harness: background QEMU processes (`-daemonize`, so they outlive the Mix task), BIOS or UEFI, state under `_build/cubi/qemu/<name>/`. The script is the one thing it stores, and QEMU's user-mode TFTP delivers it, as [phase 4](phase4.md)'s `:tftp` boots do; the images come from whatever URL the script names, a local server being `http://10.0.2.2:<port>` to the guest. ssh is forwarded to a host port, and a reboot is a cold restart of QEMU |
-| `Cubi.Provider.Vultr` | its REST API (`Req`), which stores a `pxe` startup script and boots an instance from it **(verify)** |
-| AWS (not in milestone 2) | the ipxe.org EC2 image, which runs its user data as the script **(verify)**; needs the `ena` and `nvme` drivers in the kernel (§2.5) |
+| `Cubi.Provider.Vultr` ([milestone 4](milestone4.md)) | its REST API (`Req`), which stores a `pxe` startup script and boots an instance from it **(verify)** |
+| AWS, OVHcloud ([milestone 4](milestone4.md)) | the ipxe.org EC2 image, which runs its user data as the script **(verify)**, and needs the `ena` driver in the kernel (§2.5); OVHcloud Public Cloud and bare metal as described there |
 
 Instances are diskless; storage nodes in the cloud are open
 ([questions.md](questions.md)).
